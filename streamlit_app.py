@@ -1030,6 +1030,7 @@ with tab5:
             st.info("No hay movimientos en el balance.")
     else:
         st.info("No hay conductores registrados en el sistema.")
+
 # ==========================================
 # TAB 6: 📝 NOTAS Y ANOTACIONES (GitHub Backend)
 # ==========================================
@@ -1048,7 +1049,10 @@ with tab6:
         es_edicion = st.session_state["editando_nota_id"] is not None
         nota_a_editar = next((n for n in notas_actuales if n["id"] == st.session_state["editando_nota_id"]), None) if es_edicion else None
 
-        with st.form("form_gestion_notas", clear_form=not es_edicion):
+        # Definir clear_form de manera estrictamente booleana
+        limpiar_despues_de_enviar = False if es_edicion else True
+
+        with st.form("form_gestion_notas", clear_form=limpiar_despues_de_enviar):
             st.markdown(f"### {'✏️ Editar Nota' if es_edicion else '➕ Nueva Anotación'}")
             
             titulo_input = st.text_input("Título", value=nota_a_editar["titulo"] if nota_a_editar else "")

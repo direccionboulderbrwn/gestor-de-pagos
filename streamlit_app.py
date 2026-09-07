@@ -233,6 +233,7 @@ with tab1:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
+
 # ==========================================
 # TAB 2: DEUDAS POR PAGAR Y ABONOS/LIQUIDACIÓN
 # ==========================================
@@ -360,23 +361,21 @@ with tab2:
             st.markdown("##### 🧮 Cálculo de Importes, Descuentos/Penalizaciones al Proveedor e IVA")
             monto_base_p = st.number_input("Monto Base / Subtotal Factura Proveedor ($)", min_value=0.0, format="%.2f", key="val_base_cxp")
             
-            col_ppen1, col_ppen2 = st.columns(2)
-            with col_ppen1:
-                aplica_pen_prov = st.checkbox("¿Le apliqué penalización o descuento a este proveedor?", key="chk_pen_prov")
-            with col_ppen2:
-                monto_penalizacion_p = st.number_input("Monto de Descuento/Penalización ($)", min_value=0.0, format="%.2f", key="val_pen_prov") if aplica_pen_prov else 0.0
-                
-            motivo_penalizacion_p = st.text_input("Motivo de la penalización al proveedor", key="mot_pen_prov") if aplica_pen_prov else ""
+            aplica_pen_prov = st.checkbox("¿Le apliqué penalización o descuento a este proveedor?", key="chk_pen_prov")
+            monto_penalizacion_p = st.number_input("Monto de Descuento/Penalización ($)", min_value=0.0, format="%.2f", key="val_pen_prov")
+            motivo_penalizacion_p = st.text_input("Motivo de la penalización al proveedor", key="mot_pen_prov")
             
             aplicar_iva_p = st.checkbox("Agregar IVA (16%)", value=True, key="chk_iva_cxp")
             concepto_p = st.text_area("Concepto / Detalle general", key="con_cxp_form")
             
             # --- CÁLCULO FINANCIERO ---
-            subtotal_neto_p = max(0.0, monto_base_p - monto_penalizacion_p)
+            penalizacion_real_p = monto_penalizacion_p if aplica_pen_prov else 0.0
+            
+            subtotal_neto_p = max(0.0, monto_base_p - penalizacion_real_p)
             iva_monto_p = subtotal_neto_p * 0.16 if aplicar_iva_p else 0.0
             monto_final_neto_p = subtotal_neto_p + iva_monto_p
             
-            st.info(f"💡 **Resumen Calculado:** Subtotal Neto a Pagar: **${subtotal_neto_p:,.2f}** | IVA: **${iva_monto_p:,.2f}** | **Total Final Neto: ${monto_final_neto_p:,.2f}**")
+            st.info(f"💡 Subtotal Neto a Pagar: ${subtotal_neto_p:,.2f} | IVA: ${iva_monto_p:,.2f} | **Total Final Neto: ${monto_final_neto_p:,.2f}**")
             
             if st.form_submit_button("Guardar Deuda por Pagar"):
                 if not lista_nombres_p:
@@ -385,8 +384,8 @@ with tab2:
                     id_prov_real = mapa_provs.get(proveedor_nombre_sel)
                     try:
                         detalle_completo_p = f"{concepto_p} | Subtotal: ${monto_base_p:,.2f}"
-                        if aplica_penalizacion_p:
-                            detalle_completo_p += f" | Menos Penalización al proveedor (${monto_penalizacion_p:,.2f}): {motivo_penalizacion_p}"
+                        if aplica_pen_prov and penalizacion_real_p > 0:
+                            detalle_completo_p += f" | Menos Penalización al proveedor (${penalizacion_real_p:,.2f}): {motivo_penalizacion_p}"
 
                         data_pagar = {
                             "ID_MOVIMIENTO": id_mov_p_auto,

@@ -1,42 +1,23 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
-    page_title="Gestión de Deudas - TEN",
+    page_title="Gestión de Pagos - TEN",
     page_icon="📊",
     layout="wide"
 )
 
-# --- CONEXIÓN A GOOGLE SHEETS ---
-@st.cache_resource
-def init_connection():
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    # Carga las credenciales desde los secretos de Streamlit Cloud
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    return client
+# --- RUTA DEL ARCHIVO EXCEL EN GITHUB ---
+EXCEL_FILE = "TEN.xlsx"  # Cambia esto por el nombre exacto de tu archivo subido a GitHub
 
-try:
-    client = init_connection()
-    # Abre tu hoja de cálculo por nombre (asegúrate de que el archivo se llame "TEN" o cámbialo aquí)
-    sheet = client.open("TEN")
-except Exception as e:
-    st.error(f"Error al conectar con Google Sheets: {e}")
-    st.stop()
-
-# --- FUNCIONES DE CARGA DE DATOS ---
-def load_data(sheet_name):
+# --- FUNCIÓN DE CARGA DE DATOS ---
+@st.cache_data
+def load_excel_data(file_path, sheet_name):
     try:
-        worksheet = sheet.worksheet(sheet_name)
-        data = worksheet.get_all_records()
-        return pd.DataFrame(data)
+        # Lee la pestaña específica del archivo de Excel
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
+        return df
     except Exception as e:
         st.warning(f"No se pudo cargar la pestaña {sheet_name}: {e}")
         return pd.DataFrame()
@@ -49,27 +30,29 @@ tab1, tab2 = st.tabs(["💰 Deudas por Cobrar", "📉 Deudas por Pagar"])
 
 with tab1:
     st.subheader("Listado de Deudas por Cobrar")
-    df_cobrar = load_data("DEUDAS_X_COBRAR")
+    df_cobrar = load_excel_data(EXCEL_FILE, "DEUDAS_X_COBRAR")
     
     if not df_cobrar.empty:
-        # Filtro rápido
-        filtro_estado = st.selectbox("Filtrar por Estatus (Cobrar):", ["Todos"] + list(df_cobrar["ESTATUS"].unique()))
-        if filtro_estado != "Todos":
-            df_cobrar = df_cobrar[df_cobrar["ESTATUS"] == filtro_estado]
-            
+        # Filtro rápido por Estatus si la columna existe
+        if "ESTATUS" in df_cobrar.columns:
+            filtro_estado = st.selectbox("Filtrar por Estatus (Cobrar):", ["Todos"] + list(df_cobrar["ESTATUS"].unique()))
+            if filtro_estado != "Todos":
+                df_cobrar = df_cobrar[df_cobrar["ESTATUS"] == filtro_estado]
+                
         st.dataframe(df_cobrar, use_container_width=True)
     else:
-        st.info("La tabla 'DEUDAS_X_COBRAR' está vacía o no se encontró.")
+        st.info("La pestaña 'DEUDAS_X_COBRAR' está vacía o no se encontró en el archivo Excel.")
 
 with tab2:
     st.subheader("Listado de Deudas por Pagar")
-    df_pagar = load_data("DEUDA_X_PAGAR")
+    df_pagar = load_excel_data(EXCEL_FILE, "DEUDA_X_PAGAR")
     
     if not df_pagar.empty:
-        filtro_estado_p = st.selectbox("Filtrar por Estatus (Pagar):", ["Todos"] + list(df_pagar["ESTATUS"].unique()))
-        if filtro_estado_p != "Todos":
-            df_pagar = df_pagar[df_pagar["ESTATUS"] == filtro_estado_p]
-            
+        if "ESTATUS" in df_pagar.columns:
+            filtro_estado_p = st.selectbox("Filtrar por Estatus (Pagar):", ["Todos"] + list(df_pagar["ESTATUS"].unique()))
+            if filtro_estado_p != "Todos":
+                df_pagar = df_pagar[df_pagar["ESTATUS"] == filtro_estado_p]
+                
         st.dataframe(df_pagar, use_container_width=True)
     else:
-        st.info("La tabla 'DEUDA_X_PAGAR' está vacía o no se encontró.")
+        st.info("La pestaña 'DEUDA_X_PAGAR' está vacía o no se encontró en el archivo Excel.")

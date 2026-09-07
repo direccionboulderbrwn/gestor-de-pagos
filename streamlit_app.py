@@ -339,7 +339,7 @@ with tab2:
     else:
         st.info("No hay registros de deudas por pagar.")
         
-    with st.expander("➕ Registrar Nueva Deuda por Pagar a Proveedor (Con Penalización e IVA)"):
+    with st.expander("➕ Registrar Nueva Deuda por Pagar a Proveedor (Con Penalizaciones Múltiples, IVA y RESICO)"):
         id_mov_p_auto = generar_id("CXP")
         with st.form("form_nueva_deuda_pagar"):
             st.text_input("ID Movimiento (Generado Automáticamente)", value=id_mov_p_auto, disabled=True, key="txt_id_cxp_form")
@@ -358,24 +358,31 @@ with tab2:
             fecha_op_p = st.date_input("Fecha de Operación", key="fec_cxp_form")
             
             st.markdown("---")
-            st.markdown("##### 🧮 Cálculo de Importes, Descuentos/Penalizaciones al Proveedor e IVA")
+            st.markdown("##### 🧮 Cálculo de Importes, Descuentos/Penalizaciones Múltiples y Tasas Fiscales")
             monto_base_p = st.number_input("Monto Base / Subtotal Factura Proveedor ($)", min_value=0.0, format="%.2f", key="val_base_cxp")
             
-            aplica_pen_prov = st.checkbox("¿Le apliqué penalización o descuento a este proveedor?", key="chk_pen_prov")
-            monto_penalizacion_p = st.number_input("Monto de Descuento/Penalización ($)", min_value=0.0, format="%.2f", key="val_pen_prov")
-            motivo_penalizacion_p = st.text_input("Motivo de la penalización al proveedor", key="mot_pen_prov")
+            aplica_pen_prov = st.checkbox("¿Le apliqué una o varias penalizaciones o descuentos a este proveedor?", key="chk_pen_prov")
+            monto_penalizacion_p = st.number_input("Monto Total de las Penalizaciones ($)", min_value=0.0, format="%.2f", key="val_pen_prov")
+            motivos_multiples_p = st.text_area("Desglose de Motivos (Ej. 1. Retraso: $500 | 2. Daño: $300)", key="mot_pen_prov_mult")
             
-            aplicar_iva_p = st.checkbox("Agregar IVA (16%)", value=True, key="chk_iva_cxp")
+            col_imp1_p, col_imp2_p = st.columns(2)
+            with col_imp1_p:
+                aplicar_iva_p = st.checkbox("Agregar IVA (16%)", value=True, key="chk_iva_cxp")
+            with col_imp2_p:
+                aplicar_resico_p = st.checkbox("Régimen RESICO Persona Física (Retención ISR 1.25% y Retención IVA 10.66%)", value=False, key="chk_resico_cxp")
+                
             concepto_p = st.text_area("Concepto / Detalle general", key="con_cxp_form")
             
-            # --- CÁLCULO FINANCIERO ---
+            # --- CÁLCULO FINANCIERO Y FISCAL ---
             penalizacion_real_p = monto_penalizacion_p if aplica_pen_prov else 0.0
             
             subtotal_neto_p = max(0.0, monto_base_p - penalizacion_real_p)
             iva_monto_p = subtotal_neto_p * 0.16 if aplicar_iva_p else 0.0
-            monto_final_neto_p = subtotal_neto_p + iva_monto_p
+            ret_isr_p = subtotal_neto_p * 0.0125 if aplicar_resico_p else 0.0
+            ret_iva_p = subtotal_neto_p * (2/3 * 0.16) if aplicar_resico_p else 0.0
+            monto_final_neto_p = subtotal_neto_p + iva_monto_p - ret_isr_p - ret_iva_p
             
-            st.info(f"💡 Subtotal Neto a Pagar: ${subtotal_neto_p:,.2f} | IVA: ${iva_monto_p:,.2f} | **Total Final Neto: ${monto_final_neto_p:,.2f}**")
+            st.info(f"💡 Subtotal Neto a Pagar: ${subtotal_neto_p:,.2f} | IVA: ${iva_monto_p:,.2f} | Retenciones: -${(ret_isr_p + ret_iva_p):,.2f} | **Total Final Neto: ${monto_final_neto_p:,.2f}**")
             
             if st.form_submit_button("Guardar Deuda por Pagar"):
                 if not lista_nombres_p:
@@ -385,7 +392,9 @@ with tab2:
                     try:
                         detalle_completo_p = f"{concepto_p} | Subtotal: ${monto_base_p:,.2f}"
                         if aplica_pen_prov and penalizacion_real_p > 0:
-                            detalle_completo_p += f" | Menos Penalización al proveedor (${penalizacion_real_p:,.2f}): {motivo_penalizacion_p}"
+                            detalle_completo_p += f" | Total Penalizaciones al proveedor (${penalizacion_real_p:,.2f}): {motivos_multiples_p}"
+                        if aplicar_resico_p:
+                            detalle_completo_p += f" | Retenciones RESICO aplicadas"
 
                         data_pagar = {
                             "ID_MOVIMIENTO": id_mov_p_auto,

@@ -150,7 +150,7 @@ with tab1:
     else:
         st.info("No hay registros suficientes en DEUDAS_X_COBRAR.")
         
-    with st.expander("➕ Registrar Nueva Deuda por Cobrar (Con Penalización, IVA y RESICO)"):
+    with st.expander("➕ Registrar Nueva Deuda por Cobrar (Con Penalizaciones Múltiples, IVA y RESICO)"):
         id_mov_auto = generar_id("CXC")
         with st.form("form_nueva_deuda_cobrar"):
             st.text_input("ID Movimiento (Generado Automáticamente)", value=id_mov_auto, disabled=True, key="txt_id_cxc")
@@ -169,12 +169,12 @@ with tab1:
             fecha_op = st.date_input("Fecha de Operación", key="fec_cxc_form")
             
             st.markdown("---")
-            st.markdown("##### 🧮 Cálculo de Importes, Penalización y Tasas Fiscales")
+            st.markdown("##### 🧮 Cálculo de Importes, Penalizaciones Múltiples y Tasas Fiscales")
             monto_base = st.number_input("Monto Base / Subtotal Factura ($)", min_value=0.0, format="%.2f", key="val_base_cxc")
             
-            aplica_pen_cli = st.checkbox("¿El cliente aplicó penalización a este monto?", key="chk_pen_cli")
-            monto_penalizacion = st.number_input("Monto de la Penalización ($)", min_value=0.0, format="%.2f", key="val_pen_cli")
-            motivo_penalizacion = st.text_input("Motivo o detalle de la Penalización", key="mot_pen_cli")
+            aplica_pen_cli = st.checkbox("¿El cliente aplicó una o varias penalizaciones a este monto?", key="chk_pen_cli")
+            monto_penalizacion = st.number_input("Monto Total de las Penalizaciones ($)", min_value=0.0, format="%.2f", key="val_pen_cli")
+            motivos_multiples = st.text_area("Desglose de Motivos (Ej. 1. Retraso: $500 | 2. Falta de equipo: $300)", key="mot_pen_cli_mult")
             
             col_imp1, col_imp2 = st.columns(2)
             with col_imp1:
@@ -182,7 +182,7 @@ with tab1:
             with col_imp2:
                 aplicar_resico = st.checkbox("Régimen RESICO Persona Física (Retención ISR 1.25% y Retención IVA 10.66%)", value=False, key="chk_resico_cxc")
                 
-            concepto = st.text_area("Concepto / Detalle general", key="con_cxc_form")
+            concepto = st.text_area("Concepto / Detalle general de la Operación", key="con_cxc_form")
             
             # --- CÁLCULO FINANCIERO Y FISCAL ---
             penalizacion_real = monto_penalizacion if aplica_pen_cli else 0.0
@@ -193,7 +193,7 @@ with tab1:
             ret_iva = subtotal_neto * (2/3 * 0.16) if aplicar_resico else 0.0
             monto_final_neto = subtotal_neto + iva_monto - ret_isr - ret_iva
             
-            st.info(f"💡 Subtotal Neto: ${subtotal_neto:,.2f} | IVA: ${iva_monto:,.2f} | Retenciones: -${(ret_isr + ret_iva):,.2f} | Monto Final: ${monto_final_neto:,.2f}")
+            st.info(f"💡 Subtotal Neto: ${subtotal_neto:,.2f} | IVA: ${iva_monto:,.2f} | Retenciones: -${(ret_isr + ret_iva):,.2f} | **Monto Final: ${monto_final_neto:,.2f}**")
             
             if st.form_submit_button("Guardar Deuda con Desglose Fiscal"):
                 if not lista_nombres_cli:
@@ -203,7 +203,7 @@ with tab1:
                     try:
                         detalle_completo = f"{concepto} | Subtotal: ${monto_base:,.2f}"
                         if aplica_pen_cli and penalizacion_real > 0:
-                            detalle_completo += f" | Menos Penalización (${penalizacion_real:,.2f}): {motivo_penalizacion}"
+                            detalle_completo += f" | Total Penalizaciones (${penalizacion_real:,.2f}): {motivos_multiples}"
                         if aplicar_resico:
                             detalle_completo += f" | Retenciones RESICO aplicadas"
 
@@ -229,7 +229,7 @@ with tab1:
                             }
                             supabase.table("BALANCE").insert(data_balance).execute()
                             
-                        st.success("¡Deuda registrada con cálculo fiscal y reflejada correctamente!")
+                        st.success("¡Deuda registrada con múltiples penalizaciones y cálculo fiscal correcto!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")

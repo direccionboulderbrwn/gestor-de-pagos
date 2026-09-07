@@ -261,10 +261,7 @@ with tab3:
         st.info("Aún no hay movimientos liquidados que alimenten el balance.")
 
 # ==========================================
-# TAB 4: CLIENTES Y PROVEEDORES
-# ==========================================
-# ==========================================
-# TAB 4: CLIENTES Y PROVEEDORES
+# TAB 4: CLIENTES, PROVEEDORES Y CONDUCTORES
 # ==========================================
 with tab4:
     # Inicializar contadores de sesión para forzar la limpieza de formularios al guardar
@@ -272,6 +269,8 @@ with tab4:
         st.session_state["form_cli_key"] = 0
     if "form_pro_key" not in st.session_state:
         st.session_state["form_pro_key"] = 0
+    if "form_cond_key" not in st.session_state:
+        st.session_state["form_cond_key"] = 0
 
     col1, col2 = st.columns(2)
     
@@ -281,7 +280,6 @@ with tab4:
         df_cli = fetch_table("CLIENTES")
         st.dataframe(df_cli, use_container_width=True)
         
-        # Eliminar Cliente
         with st.expander("🗑️ Eliminar Cliente"):
             ids_cli = df_cli["ID_CLIENTE"].tolist() if not df_cli.empty else []
             if ids_cli:
@@ -292,25 +290,21 @@ with tab4:
                         st.success("Cliente eliminado con éxito.")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error al eliminar (asegúrate de que no tenga deudas activas asociadas): {e}")
+                        st.error(f"Error al eliminar: {e}")
             else:
-                st.info("No hay clientes registrados para eliminar.")
+                st.info("No hay clientes registrados.")
                         
         with st.expander("➕ Agregar Cliente"):
-            # Generar ID dinámico basado en el estado de sesión para que cambie al guardarse
             id_cli_auto = generar_id("CLI")
-            
-            # Usamos la llave dinámica (form_cli_key) para reiniciar el formulario por completo
             with st.form(f"form_cliente_{st.session_state['form_cli_key']}"):
-                st.text_input("ID Cliente (Generado Automáticamente)", value=id_cli_auto, disabled=True)
+                st.text_input("ID Cliente (Automático)", value=id_cli_auto, disabled=True)
                 nombre_cli = st.text_input("Nombre Comercial", key=f"nom_cli_{st.session_state['form_cli_key']}")
                 rep_cli = st.text_input("Representante Legal", key=f"rep_cli_{st.session_state['form_cli_key']}")
                 rfc_cli = st.text_input("RFC", key=f"rfc_cli_{st.session_state['form_cli_key']}")
                 fecha_alta_cli = st.date_input("Fecha de Alta", key=f"fec_cli_{st.session_state['form_cli_key']}")
                 com_cli = st.text_input("Comentarios", key=f"com_cli_{st.session_state['form_cli_key']}")
                 
-                sub_cli = st.form_submit_button("Guardar Cliente")
-                if sub_cli:
+                if st.form_submit_button("Guardar Cliente"):
                     try:
                         supabase.table("CLIENTES").insert({
                             "ID_CLIENTE": id_cli_auto,
@@ -320,8 +314,6 @@ with tab4:
                             "FECHA_INGRESO": str(fecha_alta_cli),
                             "COMENTARIOS": com_cli
                         }).execute()
-                        
-                        # Incrementamos la llave para forzar que el formulario se limpie y cree un nuevo ID
                         st.session_state["form_cli_key"] += 1
                         st.success("¡Cliente guardado exitosamente!")
                         st.rerun()
@@ -334,7 +326,6 @@ with tab4:
         df_pro = fetch_table("PROVEEDORES")
         st.dataframe(df_pro, use_container_width=True)
         
-        # Eliminar Proveedor
         with st.expander("🗑️ Eliminar Proveedor"):
             ids_pro = df_pro["ID_PROVEEDOR"].tolist() if not df_pro.empty else []
             if ids_pro:
@@ -347,21 +338,19 @@ with tab4:
                     except Exception as e:
                         st.error(f"Error al eliminar: {e}")
             else:
-                st.info("No hay proveedores registrados para eliminar.")
+                st.info("No hay proveedores registrados.")
                         
         with st.expander("➕ Agregar Proveedor"):
             id_pro_auto = generar_id("PROV")
-            
             with st.form(f"form_proveedor_{st.session_state['form_pro_key']}"):
-                st.text_input("ID Proveedor (Generado Automáticamente)", value=id_pro_auto, disabled=True)
+                st.text_input("ID Proveedor (Automático)", value=id_pro_auto, disabled=True)
                 nombre_pro = st.text_input("Nombre Comercial Proveedor", key=f"nom_pro_{st.session_state['form_pro_key']}")
                 rep_pro = st.text_input("Representante Legal", key=f"rep_pro_{st.session_state['form_pro_key']}")
                 rfc_pro = st.text_input("RFC", key=f"rfc_pro_{st.session_state['form_pro_key']}")
                 fecha_alta_pro = st.date_input("Fecha de Alta", key=f"fec_pro_{st.session_state['form_pro_key']}")
                 com_pro = st.text_input("Comentarios", key=f"com_pro_{st.session_state['form_pro_key']}")
                 
-                sub_pro = st.form_submit_button("Guardar Proveedor")
-                if sub_pro:
+                if st.form_submit_button("Guardar Proveedor"):
                     try:
                         supabase.table("PROVEEDORES").insert({
                             "ID_PROVEEDOR": id_pro_auto,
@@ -371,13 +360,71 @@ with tab4:
                             "FECHA_INGRESO": str(fecha_alta_pro),
                             "COMENTARIOS": com_pro
                         }).execute()
-                        
-                        # Incrementamos la llave para reiniciar el formulario de proveedores
                         st.session_state["form_pro_key"] += 1
                         st.success("¡Proveedor guardado exitosamente!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
+
+    st.markdown("---")
+    st.subheader("🚚 Conductores (Modelo Mixto - Asignados a Proveedores)")
+    df_cond = fetch_table("CONDUCTORES")
+    
+    if not df_cond.empty:
+        st.dataframe(df_cond, use_container_width=True)
+    else:
+        st.info("Aún no hay conductores registrados bajo el modelo mixto.")
+
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        with st.expander("🗑️ Eliminar Conductor"):
+            ids_cond = df_cond["ID_CONDUCTOR"].tolist() if not df_cond.empty else []
+            if ids_cond:
+                cond_del = st.selectbox("Selecciona ID de Conductor:", ids_cond, key="del_cond")
+                if st.button("Eliminar Conductor", key="btn_del_cond"):
+                    try:
+                        supabase.table("CONDUCTORES").delete().eq("ID_CONDUCTOR", cond_del).execute()
+                        st.success("Conductor eliminado con éxito.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al eliminar: {e}")
+            else:
+                st.info("No hay conductores para eliminar.")
+
+    with col2:
+        with st.expander("➕ Registrar Conductor (Modelo Mixto)"):
+            id_cond_auto = generar_id("COND")
+            with st.form(f"form_conductor_{st.session_state['form_cond_key']}"):
+                st.text_input("ID Conductor (Automático)", value=id_cond_auto, disabled=True)
+                nombre_cond = st.text_input("Nombre Completo del Conductor", key=f"nom_cond_{st.session_state['form_cond_key']}")
+                rfc_cond = st.text_input("RFC del Conductor", key=f"rfc_cond_{st.session_state['form_cond_key']}")
+                
+                # Cargar lista de proveedores actuales para asociarlo
+                df_provs_select = fetch_table("PROVEEDORES")
+                lista_proveedores = df_provs_select["ID_PROVEEDOR"].tolist() if not df_provs_select.empty else []
+                proveedor_asignado = st.selectbox("Proveedor al que Pertenece", lista_proveedores, key=f"prov_asig_{st.session_state['form_cond_key']}")
+                
+                fecha_alta_cond = st.date_input("Fecha de Alta", key=f"fec_cond_{st.session_state['form_cond_key']}")
+                com_cond = st.text_input("Comentarios / Unidad asignada", key=f"com_cond_{st.session_state['form_cond_key']}")
+                
+                if st.form_submit_button("Guardar Conductor"):
+                    if not proveedor_asignado:
+                        st.error("Debes registrar al menos un proveedor antes de dar de alta conductores.")
+                    else:
+                        try:
+                            supabase.table("CONDUCTORES").insert({
+                                "ID_CONDUCTOR": id_cond_auto,
+                                "NOMBRE_CONDUCTOR": nombre_cond,
+                                "RFC_CONDUCTOR": rfc_cond,
+                                "ID_PROVEEDOR": proveedor_asignado,
+                                "FECHA_ALTA": str(fecha_alta_cond),
+                                "COMENTARIOS": com_cond
+                            }).execute()
+                            st.session_state["form_cond_key"] += 1
+                            st.success("¡Conductor registrado y asociado al proveedor exitosamente!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
 # ==========================================
 # TAB 5: PENALIZACIONES
 # ==========================================

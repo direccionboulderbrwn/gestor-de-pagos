@@ -49,12 +49,33 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: DEUDAS POR COBRAR
+# TAB 1: DEUDAS POR COBRAR Y ABONOS/COBROS
 # ==========================================
 with tab1:
-    st.subheader("Listado de Deudas por Cobrar")
+    st.subheader("💰 Listado de Deudas por Cobrar a Clientes")
     df_cobrar = fetch_table("DEUDAS_X_COBRAR")
+    df_cli_tabla = fetch_table("CLIENTES")
     
+    # Cruzar para mostrar el Nombre Comercial del cliente en lugar del ID técnico
+    if not df_cobrar.empty and not df_cli_tabla.empty:
+        if "CLIENTE" in df_cobrar.columns and "ID_CLIENTE" in df_cli_tabla.columns:
+            df_cobrar = df_cobrar.merge(
+                df_cli_tabla[["ID_CLIENTE", "NOMBRE_COMERCIAL"]],
+                left_on="CLIENTE",
+                right_on="ID_CLIENTE",
+                how="left"
+            )
+            df_cobrar = df_cobrar.rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_CLIENTE"})
+            cols = [c for c in df_cobrar.columns if c not in ["CLIENTE", "ID_CLIENTE", "NOMBRE_CLIENTE"]]
+            if "ESTATUS" in cols:
+                idx = cols.index("ESTATUS")
+                cols.insert(idx, "NOMBRE_CLIENTE")
+            else:
+                cols.append("NOMBRE_CLIENTE")
+            df_cobrar = df_cobrar[cols]
+            if "CLIENTE" in df_cobrar.columns:
+                df_cobrar = df_cobrar.drop(columns=["CLIENTE"])
+
     if not df_cobrar.empty and "FECHA_OPERACION" in df_cobrar.columns:
         df_cobrar["PERIODO"] = pd.to_datetime(df_cobrar["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
         periodos_disponibles = ["Todos"] + sorted(df_cobrar["PERIODO"].dropna().unique().tolist(), reverse=True)
@@ -63,8 +84,8 @@ with tab1:
         with col_f1:
             periodo_sel = st.selectbox("Seleccionar Periodo (Mes):", periodos_disponibles, key="per_cobrar_filtro")
         with col_f2:
-            estatus_list = ["Todos"] + list(df_cobrar["ESTATUS"].dropna().unique())
-            filtro_est = st.selectbox("Filtrar por Estatus:", estatus_list, key="est_cobrar_filtro")
+            estatus_list = ["Todos", "Pendiente", "Parcial", "Pagado"]
+            filtro_est = st.selectbox("Filtrar por Estatus:", estatus_list, key="est_cobrar_filtro", index=1)
             
         df_filtrado = df_cobrar.copy()
         if periodo_sel != "Todos":
@@ -74,6 +95,49 @@ with tab1:
             
         st.dataframe(df_filtrado.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
         
+        # --- MÓDULO PARA REALIZAR ABONO / COBRAR DEUDA (LIQUIDAR) ---
+        with st.expander("💵 Realizar Abono / Cobrar Deuda (Liquidar)"):
+            df_pendientes_cobrar = df_cobrar[df_cobrar["ESTATUS"].isin(["Pendiente", "Parcial"])]
+            ids_pendientes_cobrar = df_pendientes_cobrar["ID_MOVIMIENTO"].tolist() if not df_pendientes_cobrar.empty else []
+            
+            if ids_pendientes_cobrar:
+                id_deuda_cobrar = st.selectbox("Selecciona ID de Deuda a Cobrar/Abonar:", ids_pendientes_cobrar, key="sel_deuda_abonar_cobrar")
+                
+                fila_deuda_c = df_pendientes_cobrar[df_pendientes_cobrar["ID_MOVIMIENTO"] == id_deuda_cobrar].iloc[0]
+                val_original_c = float(fila_deuda_c["VALOR"])
+                cli_afectado = fila_deuda_c.get("NOMBRE_CLIENTE", "Cliente")
+                concepto_actual_c = fila_deuda_c.get("CONCEPTO", "")
+                
+                st.info(f"Monto Total Original de la Deuda: **${val_original_c:,.2f}** | Cliente: **{cli_afectado}**")
+                
+                monto_abono_c = st.number_input("Monto del Abono / Cobro ($)", min_value=0.01, max_value=float(val_original_c), value=float(val_original_c), format="%.2f", key="input_monto_abono_cobrar")
+                fecha_abono_c = st.date_input("Fecha del Cobro", key="fec_abono_cobrar")
+                nuevo_estatus_c = st.selectbox("Estatus resultante tras el abono", ["Pagado", "Parcial"], key="nuevo_estatus_abono_cobrar")
+                
+                if st.button("Confirmar Cobro / Abono", key="btn_confirmar_abono_cobrar"):
+                    try:
+                        # 1. Actualizar el estatus en DEUDAS_X_COBRAR
+                        supabase.table("DEUDAS_X_COBRAR").update({"ESTATUS": nuevo_estatus_c}).eq("ID_MOVIMIENTO", id_deuda_cobrar).execute()
+                        
+                        # 2. Registrar automáticamente el ingreso en el BALANCE
+                        id_bal_auto_c = generar_id("BAL-COBRO")
+                        data_balance_cobro = {
+                            "ID_BALANCE": id_bal_auto_c,
+                            "FECHA": str(fecha_abono_c),
+                            "TIPO": f"Ingreso (Cobro {nuevo_estatus_c})",
+                            "CONCEPTO / DETALLE": f"Cobro a {cli_afectado} ({id_deuda_cobrar}) - {concepto_actual_c}",
+                            "MONTO": monto_abono_c,
+                            "REF_ORIGEN": id_deuda_cobrar
+                        }
+                        supabase.table("BALANCE").insert(data_balance_cobro).execute()
+                        
+                        st.success(f"¡Cobro/Abono de ${monto_abono_c:,.2f} registrado con éxito! El movimiento ha viajado al Balance como Ingreso.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al procesar el cobro: {e}")
+            else:
+                st.info("No hay deudas por cobrar pendientes o parciales en este filtro para abonar.")
+
         with st.expander("🗑️ Eliminar Registro de Deuda por Cobrar"):
             ids_disponibles = df_filtrado["ID_MOVIMIENTO"].tolist() if not df_filtrado.empty else []
             if ids_disponibles:
@@ -99,40 +163,50 @@ with tab1:
             valor = st.number_input("Valor ($)", min_value=0.0, format="%.2f", key="val_cxc_form")
             
             df_clientes = fetch_table("CLIENTES")
-            lista_clientes = df_clientes["ID_CLIENTE"].tolist() if not df_clientes.empty else []
-            cliente = st.selectbox("Cliente", lista_clientes, key="cli_cxc_form")
+            if not df_clientes.empty:
+                mapa_clis = dict(zip(df_clientes["NOMBRE_COMERCIAL"], df_clientes["ID_CLIENTE"]))
+                lista_nombres_cli = list(mapa_clis.keys())
+            else:
+                mapa_clis = {}
+                lista_nombres_cli = []
+                
+            cliente_nombre_sel = st.selectbox("Cliente", lista_nombres_cli, key="cli_cxc_form")
             
             fecha_op = st.date_input("Fecha de Operación", key="fec_cxc_form")
             concepto = st.text_area("Concepto / Detalle", key="con_cxc_form")
             
             if st.form_submit_button("Guardar Deuda"):
-                try:
-                    data_cobrar = {
-                        "ID_MOVIMIENTO": id_mov_auto,
-                        "VENTA_GASTO": venta_gasto,
-                        "ESTATUS": estatus,
-                        "VALOR": valor,
-                        "CLIENTE": cliente,
-                        "FECHA_OPERACION": str(fecha_op),
-                        "CONCEPTO": concepto
-                    }
-                    supabase.table("DEUDAS_X_COBRAR").insert(data_cobrar).execute()
-                    
-                    if estatus in ["Pagado", "Parcial"]:
-                        data_balance = {
-                            "ID_BALANCE": f"BAL-{id_mov_auto}",
-                            "FECHA": str(fecha_op),
-                            "TIPO": "Ingreso (Cobro)",
-                            "CONCEPTO / DETALLE": f"Cobro de {id_mov_auto} - {concepto}",
-                            "MONTO": valor,
-                            "REF_ORIGEN": id_mov_auto
+                if not lista_nombres_cli:
+                    st.error("Primero debes registrar clientes en el Catálogo.")
+                else:
+                    id_cli_real = mapa_clis.get(cliente_nombre_sel)
+                    try:
+                        data_cobrar = {
+                            "ID_MOVIMIENTO": id_mov_auto,
+                            "VENTA_GASTO": venta_gasto,
+                            "ESTATUS": estatus,
+                            "VALOR": valor,
+                            "CLIENTE": id_cli_real,
+                            "FECHA_OPERACION": str(fecha_op),
+                            "CONCEPTO": concepto
                         }
-                        supabase.table("BALANCE").insert(data_balance).execute()
+                        supabase.table("DEUDAS_X_COBRAR").insert(data_cobrar).execute()
                         
-                    st.success("¡Deuda registrada y reflejada en el balance con éxito!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+                        if estatus in ["Pagado", "Parcial"]:
+                            data_balance = {
+                                "ID_BALANCE": f"BAL-{id_mov_auto}",
+                                "FECHA": str(fecha_op),
+                                "TIPO": f"Ingreso (Cobro {estatus})",
+                                "CONCEPTO / DETALLE": f"Cobro a {cliente_nombre_sel} - {concepto}",
+                                "MONTO": valor,
+                                "REF_ORIGEN": id_mov_auto
+                            }
+                            supabase.table("BALANCE").insert(data_balance).execute()
+                            
+                        st.success("¡Deuda registrada y reflejada en el balance con éxito!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
 
 # ==========================================
 # TAB 2: DEUDAS POR PAGAR Y ABONOS/LIQUIDACIÓN
@@ -345,7 +419,7 @@ with tab2:
                         st.error(f"Error al registrar el pago: {e}")
 
 # ==========================================
-# TAB 3: BALANCE AUTOMÁTICO (CON MÓDULO DE ELIMINACIÓN)
+# TAB 3: BALANCE AUTOMÁTICO
 # ==========================================
 with tab3:
     st.subheader("📈 Balance Financiero Automático")
@@ -374,14 +448,12 @@ with tab3:
         st.markdown(f"### Historial de Movimientos ({periodo_sel_bal})")
         st.dataframe(df_bal_filtrado.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
         
-        # --- MÓDULO NUEVO: ELIMINAR REGISTRO DEL BALANCE ---
         with st.expander("🗑️ Eliminar Movimiento del Balance (Corrección por Error)"):
             ids_balance_disp = df_bal_filtrado["ID_BALANCE"].tolist() if not df_bal_filtrado.empty else []
             if ids_balance_disp:
                 id_bal_a_borrar = st.selectbox("Selecciona el ID_BALANCE a eliminar:", ids_balance_disp, key="del_bal_sel_tab3")
                 if st.button("Eliminar del Balance (Supabase)", key="btn_del_bal_tab3"):
                     try:
-                        # Borrado directo y garantizado en la tabla BALANCE de Supabase
                         supabase.table("BALANCE").delete().eq("ID_BALANCE", id_bal_a_borrar).execute()
                         st.success(f"¡El registro {id_bal_a_borrar} ha sido eliminado correctamente de Supabase y del Balance!")
                         st.rerun()

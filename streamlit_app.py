@@ -1056,7 +1056,14 @@ with tab6:
             
             col_f1, col_f2 = st.columns(2)
             with col_f1:
-                fecha_default = datetime.strptime(nota_a_editar["fecha_creacion"], "%Y-%m-%d").date() if nota_a_editar else date.today()
+                if nota_a_editar and "fecha_creacion" in nota_a_editar:
+                    try:
+                        fecha_default = datetime.strptime(nota_a_editar["fecha_creacion"], "%Y-%m-%d").date()
+                    except Exception:
+                        fecha_default = date.today()
+                else:
+                    fecha_default = date.today()
+                
                 fecha_input = st.date_input("Fecha", value=fecha_default)
             with col_f2:
                 categorias_sugeridas = ["Operativo", "Financiero", "Proveedores", "Clientes", "General", "Urgente"]

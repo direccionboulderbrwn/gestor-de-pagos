@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
-from datetime import date
+from datetime import datetime
+import uuid
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
@@ -27,6 +28,13 @@ def fetch_table(table_name):
     except Exception as e:
         st.error(f"Error al cargar {table_name}: {e}")
         return pd.DataFrame()
+
+# --- FUNCIÓN PARA GENERAR ID ÚNICO AUTOMÁTICO ---
+def generar_id(prefijo="MOV"):
+    # Genera un identificador único basado en timestamp y sufijo aleatorio corto
+    sufijo = uuid.uuid4().hex[:6].upper()
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    return f"{prefijo}-{timestamp}-{sufijo}"
 
 # --- TÍTULO PRINCIPAL ---
 st.title("📊 Control Operativo y Financiero - TEN")
@@ -60,8 +68,13 @@ with tab1:
         st.info("No hay registros en la tabla DEUDAS_X_COBRAR.")
         
     with st.expander("➕ Registrar Nueva Deuda por Cobrar"):
+        # Generar ID automático único para esta sesión de formulario
+        id_mov_auto = generar_id("CXC")
+        
         with st.form("form_nueva_deuda_cobrar"):
-            id_mov = st.text_input("ID Movimiento (ej. MOV-001)")
+            # ID visible pero no manipulable (disabled=True)
+            st.text_input("ID Movimiento (Generado Automáticamente)", value=id_mov_auto, disabled=True)
+            
             venta_gasto = st.selectbox("Tipo", ["Venta", "Gasto"])
             estatus = st.selectbox("Estatus", ["Pendiente", "Pagado", "Parcial"])
             valor = st.number_input("Valor ($)", min_value=0.0, format="%.2f")
@@ -77,9 +90,8 @@ with tab1:
             
             if submit_cobrar:
                 try:
-                    # 1. Insertar en Deudas por Cobrar
                     data_cobrar = {
-                        "ID_MOVIMIENTO": id_mov,
+                        "ID_MOVIMIENTO": id_mov_auto,
                         "VENTA_GASTO": venta_gasto,
                         "ESTATUS": estatus,
                         "VALOR": valor,
@@ -89,15 +101,14 @@ with tab1:
                     }
                     supabase.table("DEUDAS_X_COBRAR").insert(data_cobrar).execute()
                     
-                    # 2. Si el estatus es Pagado o Parcial, se refleja automáticamente en BALANCE como Ingreso
                     if estatus in ["Pagado", "Parcial"]:
                         data_balance = {
-                            "ID_BALANCE": f"BAL-{id_mov}",
+                            "ID_BALANCE": f"BAL-{id_mov_auto}",
                             "FECHA": str(fecha_op),
                             "TIPO": "Ingreso (Cobro)",
-                            "CONCEPTO / DETALLE": f"Cobro de {id_mov} - {concepto}",
+                            "CONCEPTO / DETALLE": f"Cobro de {id_mov_auto} - {concepto}",
                             "MONTO": valor,
-                            "REF_ORIGEN": id_mov
+                            "REF_ORIGEN": id_mov_auto
                         }
                         supabase.table("BALANCE").insert(data_balance).execute()
                         
@@ -125,8 +136,11 @@ with tab2:
         st.info("No hay registros en la tabla DEUDA_X_PAGAR.")
         
     with st.expander("➕ Registrar Nueva Deuda por Pagar"):
+        id_mov_p_auto = generar_id("CXP")
+        
         with st.form("form_nueva_deuda_pagar"):
-            id_mov_p = st.text_input("ID Movimiento (ej. PAG-001)")
+            st.text_input("ID Movimiento (Generado Automáticamente)", value=id_mov_p_auto, disabled=True)
+            
             venta_gasto_p = st.selectbox("Tipo", ["Venta", "Gasto"], key="vg_pagar")
             estatus_p = st.selectbox("Estatus", ["Pendiente", "Pagado", "Parcial"], key="est_pagar")
             valor_p = st.number_input("Valor ($)", min_value=0.0, format="%.2f", key="val_pagar")
@@ -142,9 +156,8 @@ with tab2:
             
             if submit_pagar:
                 try:
-                    # 1. Insertar en Deudas por Pagar
                     data_pagar = {
-                        "ID_MOVIMIENTO": id_mov_p,
+                        "ID_MOVIMIENTO": id_mov_p_auto,
                         "VENTA_GASTO": venta_gasto_p,
                         "ESTATUS": estatus_p,
                         "VALOR": valor_p,
@@ -154,15 +167,14 @@ with tab2:
                     }
                     supabase.table("DEUDA_X_PAGAR").insert(data_pagar).execute()
                     
-                    # 2. Si se paga, se refleja automáticamente en BALANCE como Egreso
                     if estatus_p in ["Pagado", "Parcial"]:
                         data_balance = {
-                            "ID_BALANCE": f"BAL-{id_mov_p}",
+                            "ID_BALANCE": f"BAL-{id_mov_p_auto}",
                             "FECHA": str(fecha_op_p),
                             "TIPO": "Egreso (Pago)",
-                            "CONCEPTO / DETALLE": f"Pago de {id_mov_p} - {concepto_p}",
+                            "CONCEPTO / DETALLE": f"Pago de {id_mov_p_auto} - {concepto_p}",
                             "MONTO": valor_p,
-                            "REF_ORIGEN": id_mov_p
+                            "REF_ORIGEN": id_mov_p_auto
                         }
                         supabase.table("BALANCE").insert(data_balance).execute()
                         
@@ -179,7 +191,6 @@ with tab3:
     df_balance = fetch_table("BALANCE")
     
     if not df_balance.empty:
-        # Calcular ingresos y egresos basados en los registros automáticos
         ingresos = df_balance[df_balance["TIPO"].str.contains("Ingreso|Cobro", case=False, na=False)]["MONTO"].sum()
         egresos = df_balance[df_balance["TIPO"].str.contains("Egreso|Pago", case=False, na=False)]["MONTO"].sum()
         balance_neto = ingresos - egresos
@@ -206,17 +217,19 @@ with tab4:
         st.dataframe(df_cli, use_container_width=True)
         
         with st.expander("➕ Agregar Cliente"):
+            id_cli_auto = generar_id("CLI")
             with st.form("form_cliente"):
-                id_cli = st.text_input("ID Cliente (ej. CLI-001)")
+                st.text_input("ID Cliente (Generado Automáticamente)", value=id_cli_auto, disabled=True)
                 nombre_cli = st.text_input("Nombre Comercial")
                 rep_cli = st.text_input("Representante Legal")
                 rfc_cli = st.text_input("RFC")
                 com_cli = st.text_input("Comentarios")
+                
                 sub_cli = st.form_submit_button("Guardar Cliente")
                 if sub_cli:
                     try:
                         supabase.table("CLIENTES").insert({
-                            "ID_CLIENTE": id_cli,
+                            "ID_CLIENTE": id_cli_auto,
                             "NOMBRE_COMERCIAL": nombre_cli,
                             "REP_LEGAL": rep_cli,
                             "RFC": rfc_cli,
@@ -233,17 +246,19 @@ with tab4:
         st.dataframe(df_pro, use_container_width=True)
         
         with st.expander("➕ Agregar Proveedor"):
+            id_pro_auto = generar_id("PROV")
             with st.form("form_proveedor"):
-                id_pro = st.text_input("ID Proveedor (ej. PROV-001)")
+                st.text_input("ID Proveedor (Generado Automáticamente)", value=id_pro_auto, disabled=True)
                 nombre_pro = st.text_input("Nombre Comercial Proveedor")
                 rep_pro = st.text_input("Representante Legal")
                 rfc_pro = st.text_input("RFC")
                 com_pro = st.text_input("Comentarios")
+                
                 sub_pro = st.form_submit_button("Guardar Proveedor")
                 if sub_pro:
                     try:
                         supabase.table("PROVEEDORES").insert({
-                            "ID_PROVEEDOR": id_pro,
+                            "ID_PROVEEDOR": id_pro_auto,
                             "NOMBRE_COMERCIAL": nombre_pro,
                             "REP_LEGAL": rep_pro,
                             "RFC": rfc_pro,
@@ -263,8 +278,9 @@ with tab5:
     st.dataframe(df_pen, use_container_width=True)
     
     with st.expander("➕ Registrar Penalización"):
+        id_pen_auto = generar_id("PEN")
         with st.form("form_penalizacion"):
-            id_pen = st.text_input("ID Penalización (ej. PEN-001)")
+            st.text_input("ID Penalización (Generado Automáticamente)", value=id_pen_auto, disabled=True)
             tipo_pen = st.text_input("Tipo de Penalización")
             fecha_pen = st.date_input("Fecha")
             motivo_pen = st.text_area("Motivo")
@@ -274,7 +290,7 @@ with tab5:
             if sub_pen:
                 try:
                     supabase.table("PENALIZACIONES").insert({
-                        "ID_PENALIZACION": id_pen,
+                        "ID_PENALIZACION": id_pen_auto,
                         "TIPO": tipo_pen,
                         "FECHA": str(fecha_pen),
                         "MOTIVO": motivo_pen,

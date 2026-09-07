@@ -731,113 +731,188 @@ with tab4:
                             st.error(f"Error al guardar: {e}")
 
 # ==========================================
-# TAB 5: AUDITORÍA Y CONTROL UNIFICADO DE PENALIZACIONES
+# TAB 5: 📊 RESUMEN GENERAL (REPORTES Y CONCILIACIÓN)
 # ==========================================
 with tab5:
-    st.subheader("⚠️ Auditoría y Control Consolidado de Penalizaciones")
-    st.info("💡 Este módulo extrae y consolida exclusivamente el costo neto de las penalizaciones aplicadas en Deudas por Cobrar (Clientes) y Deudas por Pagar (Proveedores).")
+    st.subheader("📊 Resumen General y Reportes Financieros")
+    st.info("💡 Este módulo concentra la auditoría de penalizaciones, el resumen de pagos por proveedor, la consolidación de ingresos/egresos y la nómina por driver, conectados con las fuentes de datos principales.")
 
-    # Selector de vista
-    tipo_pen_vista = st.radio(
-        "Seleccionar origen de penalizaciones:",
-        ["Penalizaciones Aplicadas por Clientes (Tab 1)", "Penalizaciones Aplicadas a Proveedores (Tab 2)"],
-        horizontal=True,
-        key="radio_tipo_pen_audit"
-    )
+    # --- FILTROS GLOBALES PARA EL RESUMEN GENERAL ---
+    st.markdown("### 🔍 Filtros Globales de Análisis")
+    df_cxc_rg = fetch_table("DEUDAS_X_COBRAR")
+    df_cxp_rg = fetch_table("DEUDA_X_PAGAR")
+    df_bal_rg = fetch_table("BALANCE")
+    df_cond_rg = fetch_table("CONDUCTORES")
+    df_prov_rg = fetch_table("PROVEEDORES")
+    df_cli_rg = fetch_table("CLIENTES")
+
+    # Extraer periodos disponibles de las fuentes principales
+    periodos_disponibles_rg = ["Todos"]
+    all_dates = []
+    for df_temp in [df_cxc_rg, df_cxp_rg, df_bal_rg]:
+        if not df_temp.empty:
+            for col_f in ["FECHA_OPERACION", "FECHA"]:
+                if col_f in df_temp.columns:
+                    fechas_parsed = pd.to_datetime(df_temp[col_f], errors='coerce').dt.strftime('%Y-%m')
+                    all_dates.extend(fechas_parsed.dropna().unique().tolist())
+    
+    if all_dates:
+        periodos_disponibles_rg = ["Todos"] + sorted(list(set(all_dates)), reverse=True)
+
+    col_rg1, col_rg2 = st.columns(2)
+    with col_rg1:
+        filtro_periodo_rg = st.selectbox("Filtrar por Periodo (Mes):", periodos_disponibles_rg, key="rg_filtro_periodo")
+    with col_rg2:
+        lista_prov_filtro = ["Todos"] + (df_prov_rg["NOMBRE_COMERCIAL"].tolist() if not df_prov_rg.empty and "NOMBRE_COMERCIAL" in df_prov_rg.columns else [])
+        filtro_prov_rg = st.selectbox("Filtrar por Proveedor:", lista_prov_filtro, key="rg_filtro_proveedor")
+
     st.markdown("---")
 
-    df_cxc_audit = fetch_table("DEUDAS_X_COBRAR")
-    df_cxp_audit = fetch_table("DEUDA_X_PAGAR")
-    df_cli_audit = fetch_table("CLIENTES")
-    df_prov_audit = fetch_table("PROVEEDORES")
+    # ==========================================
+    # 1. BLOQUE DE INDICADORES GENERALES (KPIs)
+    # ==========================================
+    st.markdown("### 📈 Indicadores Financieros del Periodo")
+    
+    # Filtrar Balance según periodo y proveedor si aplica
+    df_bal_filtrado_rg = df_bal_rg.copy()
+    if not df_bal_filtrado_rg.empty and "FECHA" in df_bal_filtrado_rg.columns:
+        df_bal_filtrado_rg["PERIODO"] = pd.to_datetime(df_bal_filtrado_rg["FECHA"], errors='coerce').dt.strftime('%Y-%m')
+        if filtro_periodo_rg != "Todos":
+            df_bal_filtrado_rg = df_bal_filtrado_rg[df_bal_filtrado_rg["PERIODO"] == filtro_periodo_rg]
 
-    if tipo_pen_vista == "Penalizaciones Aplicadas por Clientes (Tab 1)":
-        st.markdown("### 🏢 Costo Neto de Penalizaciones por Clientes")
+    total_ingresos_rg = df_bal_filtrado_rg[df_bal_filtrado_rg["TIPO"].str.contains("Ingreso|Cobro", case=False, na=False)]["MONTO"].sum() if not df_bal_filtrado_rg.empty else 0.0
+    total_egresos_rg = df_bal_filtrado_rg[df_bal_filtrado_rg["TIPO"].str.contains("Egreso|Pago", case=False, na=False)]["MONTO"].sum() if not df_bal_filtrado_rg.empty else 0.0
+    
+    # Extracción de penalizaciones globales desde los conceptos de CXC y CXP
+    total_pen_clientes = 0.0
+    if not df_cxc_rg.empty and "CONCEPTO" in df_cxc_rg.columns:
+        import re
+        def extraer_monto_gen(texto):
+            match = re.search(r"Penalizaciones\s*\(\$(\d[\d,]*\.?\d*)\)", str(texto))
+            return float(match.group(1).replace(",", "")) if match else 0.0
+        total_pen_clientes = df_cxc_rg["CONCEPTO"].apply(extraer_monto_gen).sum()
+
+    total_pen_proveedores = 0.0
+    if not df_cxp_rg.empty and "CONCEPTO" in df_cxp_rg.columns:
+        def extraer_monto_gen_p(texto):
+            match = re.search(r"Penalizaciones.*?\(\$(\d[\d,]*\.?\d*)\)", str(texto))
+            return float(match.group(1).replace(",", "")) if match else 0.0
+        total_pen_proveedores = df_cxp_rg["CONCEPTO"].apply(extraer_monto_gen_p).sum()
+
+    total_penalizaciones_rg = total_pen_clientes + total_pen_proveedores
+    balance_neto_rg = total_ingresos_rg - total_egresos_rg
+
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+    kpi1.metric("Total Ingresos", f"${total_ingresos_rg:,.2f}")
+    kpi2.metric("Total Egresos", f"${total_egresos_rg:,.2f}")
+    kpi3.metric("Total Penalizaciones", f"${total_penalizaciones_rg:,.2f}")
+    kpi4.metric("Pago Proveedores / Nómina", f"${total_egresos_rg:,.2f}")
+    kpi5.metric("Balance Neto", f"${balance_neto_rg:,.2f}", delta=f"${balance_neto_rg:,.2f}")
+
+    st.markdown("---")
+
+    # ==========================================
+    # 2. BLOQUE DE PENALIZACIONES (Detalle actual conservado)
+    # ==========================================
+    st.markdown("### ⚠️ Detalle y Costo Neto de Penalizaciones")
+    
+    tipo_penalizacion_vista = st.radio(
+        "Selecciona el tipo de penalización a auditar:", 
+        ["Penalizaciones del Cliente hacia Mí", "Penalizaciones mías hacia el Proveedor"],
+        horizontal=True,
+        key="radio_tipo_pen_rg"
+    )
+
+    if tipo_penalizacion_vista == "Penalizaciones del Cliente hacia Mí":
+        if not df_cxc_rg.empty and not df_cli_rg.empty:
+            df_cxc_rg = df_cxc_rg.merge(df_cli_rg[["ID_CLIENTE", "NOMBRE_COMERCIAL"]], left_on="CLIENTE", right_on="ID_CLIENTE", how="left").rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_CLIENTE"})
         
-        if not df_cxc_audit.empty and not df_cli_audit.empty:
-            df_cxc_audit = df_cxc_audit.merge(
-                df_cli_audit[["ID_CLIENTE", "NOMBRE_COMERCIAL"]],
-                left_on="CLIENTE",
-                right_on="ID_CLIENTE",
-                how="left"
-            ).rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_CLIENTE"})
-
-        if not df_cxc_audit.empty and "CONCEPTO" in df_cxc_audit.columns:
-            df_pen_cxc = df_cxc_audit[df_cxc_audit["CONCEPTO"].str.contains("Penalización|Total Penalizaciones", case=False, na=False)].copy()
-            
-            if not df_pen_cxc.empty:
-                # Función auxiliar para extraer numéricamente el monto exacto de la penalización desde el texto del concepto
-                import re
-                def extraer_monto_pen(texto):
-                    match = re.search(r"Penalizaciones\s*\(\$(\d[\d,]*\.?\d*)\)", str(texto))
-                    if match:
-                        return float(match.group(1).replace(",", ""))
-                    return 0.0
-
-                df_pen_cxc["MONTO_NETO_PENALIZACION"] = df_pen_cxc["CONCEPTO"].apply(extraer_monto_pen)
-                df_pen_cxc["PERIODO"] = pd.to_datetime(df_pen_cxc["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
+        if not df_cxc_rg.empty and "CONCEPTO" in df_cxc_rg.columns:
+            df_pen_cxc_rg = df_cxc_rg[df_cxc_rg["CONCEPTO"].str.contains("Penalización|Total Penalizaciones", case=False, na=False)].copy()
+            if not df_pen_cxc_rg.empty:
+                df_pen_cxc_rg["MONTO_NETO_PENALIZACION"] = df_pen_cxc_rg["CONCEPTO"].apply(lambda x: extraer_monto_gen(x))
+                df_pen_cxc_rg["PERIODO"] = pd.to_datetime(df_pen_cxc_rg["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
                 
-                # Filtro de Periodo
-                per_c = ["Todos"] + sorted(df_pen_cxc["PERIODO"].dropna().unique().tolist(), reverse=True)
-                sel_per_c = st.selectbox("Filtrar por Periodo (Mes):", per_c, key="sel_per_audit_c")
+                if filtro_periodo_rg != "Todos":
+                    df_pen_cxc_rg = df_pen_cxc_rg[df_pen_cxc_rg["PERIODO"] == filtro_periodo_rg]
                 
-                if sel_per_c != "Todos":
-                    df_pen_cxc = df_pen_cxc[df_pen_cxc["PERIODO"] == sel_per_c]
-                
-                # Métrica clara del costo neto acumulado de penalizaciones
-                total_neto_pen_c = df_pen_cxc["MONTO_NETO_PENALIZACION"].sum()
-                col_m1, col_m2 = st.columns(2)
-                col_m1.metric("Total Registros con Penalización", len(df_pen_cxc))
-                col_m2.metric("Suma Total Costo Neto Penalizaciones", f"${total_neto_pen_c:,.2f}")
-                st.markdown("---")
-                
-                cols_mostrar = [c for c in ["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_CLIENTE", "ESTATUS", "MONTO_NETO_PENALIZACION", "CONCEPTO"] if c in df_pen_cxc.columns]
-                st.dataframe(df_pen_cxc[cols_mostrar], use_container_width=True)
+                st.dataframe(df_pen_cxc_rg[["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_CLIENTE", "ESTATUS", "MONTO_NETO_PENALIZACION", "CONCEPTO"]], use_container_width=True)
             else:
-                st.info("No se encontraron registros de deudas con penalizaciones de clientes asociadas.")
-        else:
-            st.info("No hay datos suficientes en Deudas por Cobrar.")
-
+                st.info("No hay penalizaciones de clientes registradas con los filtros actuales.")
     else:
-        st.markdown("### 🚛 Costo Neto de Penalizaciones a Proveedores")
+        if not df_cxp_rg.empty and not df_prov_rg.empty:
+            df_cxp_rg = df_cxp_rg.merge(df_prov_rg[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]], left_on="PROVEEDOR", right_on="ID_PROVEEDOR", how="left").rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_PROVEEDOR"})
         
-        if not df_cxp_audit.empty and not df_prov_audit.empty:
-            df_cxp_audit = df_cxp_audit.merge(
-                df_prov_audit[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]],
-                left_on="PROVEEDOR",
-                right_on="ID_PROVEEDOR",
-                how="left"
-            ).rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_PROVEEDOR"})
-
-        if not df_cxp_audit.empty and "CONCEPTO" in df_cxp_audit.columns:
-            df_pen_cxp = df_cxp_audit[df_cxp_audit["CONCEPTO"].str.contains("Penalización|Menos Penalización|Descuento", case=False, na=False)].copy()
-            
-            if not df_pen_cxp.empty:
-                import re
-                def extraer_monto_pen_p(texto):
-                    match = re.search(r"Penalizaciones.*?\(\$(\d[\d,]*\.?\d*)\)", str(texto))
-                    if match:
-                        return float(match.group(1).replace(",", ""))
-                    return 0.0
-
-                df_pen_cxp["MONTO_NETO_PENALIZACION"] = df_pen_cxp["CONCEPTO"].apply(extraer_monto_pen_p)
-                df_pen_cxp["PERIODO"] = pd.to_datetime(df_pen_cxp["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
+        if not df_cxp_rg.empty and "CONCEPTO" in df_cxp_rg.columns:
+            df_pen_cxp_rg = df_cxp_rg[df_cxp_rg["CONCEPTO"].str.contains("Penalización|Menos Penalización|Descuento", case=False, na=False)].copy()
+            if not df_pen_cxp_rg.empty:
+                df_pen_cxp_rg["MONTO_NETO_PENALIZACION"] = df_pen_cxp_rg["CONCEPTO"].apply(lambda x: extraer_monto_gen_p(x))
+                df_pen_cxp_rg["PERIODO"] = pd.to_datetime(df_pen_cxp_rg["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
                 
-                per_p = ["Todos"] + sorted(df_pen_cxp["PERIODO"].dropna().unique().tolist(), reverse=True)
-                sel_per_p = st.selectbox("Filtrar por Periodo (Mes):", per_p, key="sel_per_audit_p")
+                if filtro_periodo_rg != "Todos":
+                    df_pen_cxp_rg = df_pen_cxp_rg[df_pen_cxp_rg["PERIODO"] == filtro_periodo_rg]
                 
-                if sel_per_p != "Todos":
-                    df_pen_cxp = df_pen_cxp[df_pen_cxp["PERIODO"] == sel_per_p]
-                
-                total_neto_pen_p = df_pen_cxp["MONTO_NETO_PENALIZACION"].sum()
-                col_pm1, col_pm2 = st.columns(2)
-                col_pm1.metric("Total Registros con Penalización", len(df_pen_cxp))
-                col_pm2.metric("Suma Total Costo Neto Penalizaciones", f"${total_neto_pen_p:,.2f}")
-                st.markdown("---")
-                
-                cols_mostrar_p = [c for c in ["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_PROVEEDOR", "ESTATUS", "MONTO_NETO_PENALIZACION", "CONCEPTO"] if c in df_pen_cxp.columns]
-                st.dataframe(df_pen_cxp[cols_mostrar_p], use_container_width=True)
+                st.dataframe(df_pen_cxp_rg[["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_PROVEEDOR", "ESTATUS", "MONTO_NETO_PENALIZACION", "CONCEPTO"]], use_container_width=True)
             else:
-                st.info("No se encontraron registros de deudas con penalizaciones a proveedores asociadas.")
+                st.info("No hay penalizaciones a proveedores registradas con los filtros actuales.")
+
+    st.markdown("---")
+
+    # ==========================================
+    # 3. RESUMEN DE PAGO POR PROVEEDOR
+    # ==========================================
+    st.markdown("### 🏢 Resumen de Pago por Proveedor")
+    if not df_cxp_rg.empty and not df_prov_rg.empty:
+        # Asegurar cruce de proveedor comercial
+        if "NOMBRE_PROVEEDOR" not in df_cxp_rg.columns:
+            df_cxp_rg = df_cxp_rg.merge(df_prov_rg[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]], left_on="PROVEEDOR", right_on="ID_PROVEEDOR", how="left").rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_PROVEEDOR"})
+        
+        df_cxp_rg["PERIODO"] = pd.to_datetime(df_cxp_rg["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
+        df_prov_resumen = df_cxp_rg.copy()
+        
+        if filtro_periodo_rg != "Todos":
+            df_prov_resumen = df_prov_resumen[df_prov_resumen["PERIODO"] == filtro_periodo_rg]
+        if filtro_prov_rg != "Todos":
+            df_prov_resumen = df_prov_resumen[df_prov_resumen["NOMBRE_PROVEEDOR"] == filtro_prov_rg]
+
+        if not df_prov_resumen.empty:
+            # Agrupación por proveedor
+            resumen_prov = df_prov_resumen.groupby("NOMBRE_PROVEEDOR").agg(
+                Servicios_Generados=("VALOR", "sum"),
+                Egresos_Pagados=("VALOR", lambda x: x[df_prov_resumen.loc[x.index, "ESTATUS"] == "Pagado"].sum()),
+                Pago_Neto=("VALOR", "sum"),
+                Periodo=("PERIODO", "first")
+            ).reset_index()
+            
+            st.dataframe(resumen_prov, use_container_width=True)
         else:
-            st.info("No hay datos suficientes en Deudas por Pagar.")
+            st.info("No hay información de proveedores para el filtro seleccionado.")
+    else:
+        st.info("No hay datos suficientes de cuentas por pagar a proveedores.")
+
+    st.markdown("---")
+
+    # ==========================================
+    # 4. RESUMEN DE NÓMINA POR DRIVER
+    # ==========================================
+    st.markdown("### 🚚 Resumen de Nómina por Driver")
+    df_bal_cond = fetch_table("BALANCE")
+    if not df_cond_rg.empty and not df_prov_rg.empty:
+        df_cond_rg = df_cond_rg.merge(df_prov_rg[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]], on="ID_PROVEEDOR", how="left").rename(columns={"NOMBRE_COMERCIAL": "PROVEEDOR_ASOCIADO"})
+        
+        # Cruzar con balance de pagos a conductores
+        if not df_bal_cond.empty:
+            pagos_drivers = df_bal_cond[df_bal_cond["TIPO"].str.contains("Pago Conductor", case=False, na=False)].copy()
+            pagos_drivers["PERIODO"] = pd.to_datetime(pagos_drivers["FECHA"], errors='coerce').dt.strftime('%Y-%m')
+            
+            if filtro_periodo_rg != "Todos":
+                pagos_drivers = pagos_drivers[pagos_drivers["PERIODO"] == filtro_periodo_rg]
+                
+            if not pagos_drivers.empty:
+                st.dataframe(pagos_drivers[["ID_BALANCE", "FECHA", "CONCEPTO / DETALLE", "MONTO"]], use_container_width=True)
+            else:
+                st.info("No hay pagos a drivers registrados en este periodo.")
+        else:
+            st.info("No hay movimientos en el balance.")
+    else:
+        st.info("No hay conductores registrados en el sistema.")

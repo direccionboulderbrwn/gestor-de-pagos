@@ -3,6 +3,9 @@ import pandas as pd
 from supabase import create_client, Client
 from datetime import datetime
 import uuid
+import requests
+import base64
+import json
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
@@ -38,8 +41,16 @@ def generar_id(prefijo="MOV"):
 # ==========================================
 # NUEVAS FUNCIONES BACKEND PARA GESTIÓN DE NOTAS EN GITHUB
 # ==========================================
-GITHUB_TOKEN = st.secrets["github"]["token"] if "github" in st.secrets and "token" in st.secrets else None
-GITHUB_REPO = st.secrets["github"]["repo"] if "github" in st.secrets and "repo" in st.secrets else None
+try:
+    GITHUB_TOKEN = st.secrets["github"]["token"]
+except Exception:
+    GITHUB_TOKEN = None
+
+try:
+    GITHUB_REPO = st.secrets["github"]["repo"]
+except Exception:
+    GITHUB_REPO = None
+
 FILE_PATH = "data/notas.json"
 
 def github_api_headers():
@@ -50,6 +61,7 @@ def github_api_headers():
     }
 
 def obtener_notas_github():
+    """Consulta la versión actual de data/notas.json en GitHub y retorna la lista de notas y el SHA."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return [], None
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
@@ -59,7 +71,6 @@ def obtener_notas_github():
             file_data = response.json()
             sha = file_data["sha"]
             content_bytes = base64.b64decode(file_data["content"])
-            import json
             notas = json.loads(content_bytes.decode("utf-8"))
             return notas, sha
         elif response.status_code == 404:
@@ -70,11 +81,11 @@ def obtener_notas_github():
         return [], None
 
 def guardar_notas_github(notas, sha, mensaje_commit):
+    """Actualiza data/notas.json en GitHub usando el SHA correspondiente y generando un commit descriptivo."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         st.error("No se han configurado las credenciales de GitHub en los Secrets.")
         return False
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
-    import json
     content_str = json.dumps(notas, indent=4, ensure_ascii=False)
     content_encoded = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
     payload = {
@@ -87,7 +98,7 @@ def guardar_notas_github(notas, sha, mensaje_commit):
         response = requests.put(url, headers=github_api_headers(), json=payload)
         return response.status_code in [200, 201]
     except Exception:
-        return false
+        return False
 
 
 # --- TÍTULO PRINCIPAL ---
@@ -103,7 +114,6 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Resumen General", 
     "Notas y Anotaciones"
 ])
-
 # ==========================================
 # TAB 1: DEUDAS POR COBRAR
 # ==========================================

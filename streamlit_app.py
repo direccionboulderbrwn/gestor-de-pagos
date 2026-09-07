@@ -497,7 +497,7 @@ with tab2:
                     except Exception as e:
                         st.error(f"Error al registrar el pago: {e}")
 # ==========================================
-# TAB 3: BALANCE AUTOMÁTICO (Ajustado a la lógica correcta)
+# TAB 3: BALANCE AUTOMÁTICO (Consistente con Penalizaciones Netas)
 # ==========================================
 with tab3:
     st.subheader("📈 Balance Financiero Automático")
@@ -513,21 +513,13 @@ with tab3:
         if periodo_sel_bal != "Todos":
             df_bal_filtrado = df_bal_filtrado[df_bal_filtrado["PERIODO"] == periodo_sel_bal]
             
-        # Ingresos: Cobros normales + Penalizaciones aplicadas a proveedores (descuentos a nuestro favor)
-        ingresos = df_bal_filtrado[
-            df_bal_filtrado["TIPO"].str.contains("Ingreso|Cobro|Penalización Proveedor", case=False, na=False)
-        ]["MONTO"].sum()
-        
-        # Egresos: Pagos normales + Pagos a conductores + Penalizaciones aplicadas por clientes (descuentos que nos hacen)
-        egresos = df_bal_filtrado[
-            df_bal_filtrado["TIPO"].str.contains("Egreso|Pago|Penalización Cliente", case=False, na=False)
-        ]["MONTO"].sum()
-        
+        ingresos = df_bal_filtrado[df_bal_filtrado["TIPO"].str.contains("Ingreso|Cobro", case=False, na=False)]["MONTO"].sum()
+        egresos = df_bal_filtrado[df_bal_filtrado["TIPO"].str.contains("Egreso|Pago", case=False, na=False)]["MONTO"].sum()
         balance_neto = ingresos - egresos
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("Total Ingresos", f"${ingresos:,.2f}")
-        col2.metric("Total Egresos", f"${egresos:,.2f}")
+        col1.metric("Total Cobrado (Ingresos)", f"${ingresos:,.2f}")
+        col2.metric("Total Pagado (Egresos)", f"${egresos:,.2f}")
         col3.metric("Balance Neto", f"${balance_neto:,.2f}", delta=f"${balance_neto:,.2f}")
         st.markdown("---")
         

@@ -169,7 +169,6 @@ with tab2:
         with col_p1:
             periodo_sel_p = st.selectbox("Seleccionar Periodo (Mes):", periodos_p_disp, key="per_pagar_filtro_tab2")
         with col_p2:
-            # Por defecto filtramos los pendientes o mostramos todos
             estatus_list_p = ["Todos", "Pendiente", "Parcial", "Pagado"]
             filtro_est_p = st.selectbox("Filtrar por Estatus:", estatus_list_p, key="est_pagar_filtro_tab2", index=1)
             
@@ -183,14 +182,12 @@ with tab2:
         
         # --- MÓDULO PARA REALIZAR ABONO / PAGAR Y MANDAR AL BALANCE ---
         with st.expander("💸 Realizar Abono / Pagar Deuda (Liquidar)"):
-            # Solo mostrar deudas que no estén totalmente pagadas
             df_pendientes = df_pagar[df_pagar["ESTATUS"].isin(["Pendiente", "Parcial"])]
             ids_pendientes = df_pendientes["ID_MOVIMIENTO"].tolist() if not df_pendientes.empty else []
             
             if ids_pendientes:
                 id_deuda_pagar = st.selectbox("Selecciona ID de Deuda a Pagar/Abonar:", ids_pendientes, key="sel_deuda_abonar")
                 
-                # Obtener info de la deuda seleccionada
                 fila_deuda = df_pendientes[df_pendientes["ID_MOVIMIENTO"] == id_deuda_pagar].iloc[0]
                 val_original = float(fila_deuda["VALOR"])
                 prov_afectado = fila_deuda.get("NOMBRE_PROVEEDOR", "Proveedor")
@@ -205,7 +202,7 @@ with tab2:
                 if st.button("Confirmar Pago / Abono", key="btn_confirmar_abono"):
                     try:
                         # 1. Actualizar el estatus de la deuda en DEUDA_X_PAGAR
-                        supabase.table("DEUDA_X_PAGAR").update({"ESTATUS": nuevo_estatus}).eq("ID_MOVIMIENTO", id_deuda_pagar).execute()
+                        res_up = supabase.table("DEUDA_X_PAGAR").update({"ESTATUS": nuevo_estatus}).eq("ID_MOVIMIENTO", id_deuda_pagar).execute()
                         
                         # 2. Registrar automáticamente el egreso en el BALANCE
                         id_bal_auto = generar_id("BAL-PAGO")
@@ -217,12 +214,12 @@ with tab2:
                             "MONTO": monto_abono,
                             "REF_ORIGEN": id_deuda_pagar
                         }
-                        supabase.table("BALANCE").insert(data_balance_pago).execute()
+                        res_ins = supabase.table("BALANCE").insert(data_balance_pago).execute()
                         
                         st.success(f"¡Abono de ${monto_abono:,.2f} registrado con éxito! El movimiento ha viajado al Balance y la deuda quedó como '{nuevo_estatus}'.")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error al procesar el abono: {e}")
+                        st.error(f"Error crítico al procesar el abono (Verifica si la tabla BALANCE tiene RLS desactivado en Supabase): {e}")
             else:
                 st.info("No hay deudas pendientes o parciales en este filtro para abonar.")
 
@@ -279,7 +276,6 @@ with tab2:
                         }
                         supabase.table("DEUDA_X_PAGAR").insert(data_pagar).execute()
                         
-                        # Si se crea directamente como pagado o parcial, también se va al balance
                         if estatus_p in ["Pagado", "Parcial"]:
                             data_balance = {
                                 "ID_BALANCE": f"BAL-{id_mov_p_auto}",

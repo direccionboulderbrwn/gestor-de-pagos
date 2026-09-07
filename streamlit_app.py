@@ -138,6 +138,10 @@ with tab1:
 # TAB 2: DEUDAS POR PAGAR Y ABONOS/LIQUIDACIÓN
 # ==========================================
 with tab2:
+    # Inicializar contador de sesión para limpiar el formulario de pago a conductor
+    if "form_pago_cond_key" not in st.session_state:
+        st.session_state["form_pago_cond_key"] = 0
+
     st.subheader("📉 Listado de Deudas por Pagar a Proveedores")
     df_pagar = fetch_table("DEUDA_X_PAGAR")
     df_prov_tabla = fetch_table("PROVEEDORES")
@@ -180,7 +184,6 @@ with tab2:
             
         st.dataframe(df_filtrado_p.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
         
-        # --- MÓDULO PARA REALIZAR ABONO / PAGAR Y MANDAR AL BALANCE ---
         with st.expander("💸 Realizar Abono / Pagar Deuda (Liquidar)"):
             df_pendientes = df_pagar[df_pagar["ESTATUS"].isin(["Pendiente", "Parcial"])]
             ids_pendientes = df_pendientes["ID_MOVIMIENTO"].tolist() if not df_pendientes.empty else []
@@ -201,10 +204,8 @@ with tab2:
                 
                 if st.button("Confirmar Pago / Abono", key="btn_confirmar_abono"):
                     try:
-                        # 1. Actualizar el estatus de la deuda en DEUDA_X_PAGAR
-                        res_up = supabase.table("DEUDA_X_PAGAR").update({"ESTATUS": nuevo_estatus}).eq("ID_MOVIMIENTO", id_deuda_pagar).execute()
+                        supabase.table("DEUDA_X_PAGAR").update({"ESTATUS": nuevo_estatus}).eq("ID_MOVIMIENTO", id_deuda_pagar).execute()
                         
-                        # 2. Registrar automáticamente el egreso en el BALANCE
                         id_bal_auto = generar_id("BAL-PAGO")
                         data_balance_pago = {
                             "ID_BALANCE": id_bal_auto,
@@ -214,12 +215,12 @@ with tab2:
                             "MONTO": monto_abono,
                             "REF_ORIGEN": id_deuda_pagar
                         }
-                        res_ins = supabase.table("BALANCE").insert(data_balance_pago).execute()
+                        supabase.table("BALANCE").insert(data_balance_pago).execute()
                         
-                        st.success(f"¡Abono de ${monto_abono:,.2f} registrado con éxito! El movimiento ha viajado al Balance y la deuda quedó como '{nuevo_estatus}'.")
+                        st.success(f"¡Abono de ${monto_abono:,.2f} registrado con éxito! El movimiento ha viajado al Balance.")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error crítico al procesar el abono (Verifica si la tabla BALANCE tiene RLS desactivado en Supabase): {e}")
+                        st.error(f"Error al procesar el abono: {e}")
             else:
                 st.info("No hay deudas pendientes o parciales en este filtro para abonar.")
 
@@ -308,8 +309,10 @@ with tab2:
 
     with st.expander("➕ Registrar Pago o Abono a Conductor"):
         id_pago_cond_auto = generar_id("PAG-COND")
-        with st.form("form_pago_conductor"):
-            st.text_input("ID Transacción (Automático)", value=id_pago_cond_auto, disabled=True, key="txt_id_pago_cond")
+        
+        # Formulario vinculado al contador de sesión para que se limpie al guardar
+        with st.form(f"form_pago_conductor_{st.session_state['form_pago_cond_key']}"):
+            st.text_input("ID Transacción (Automático)", value=id_pago_cond_auto, disabled=True, key=f"txt_id_pago_cond_{st.session_state['form_pago_cond_key']}")
             
             if not df_conds.empty:
                 mapa_conds = dict(zip(df_conds["NOMBRE_CONDUCTOR"], df_conds["ID_CONDUCTOR"]))
@@ -318,10 +321,10 @@ with tab2:
                 mapa_conds = {}
                 lista_nombres_c = []
                 
-            conductor_sel = st.selectbox("Seleccionar Conductor", lista_nombres_c, key="sel_cond_pago_form")
-            monto_cond = st.number_input("Monto del Pago / Abono ($)", min_value=0.0, format="%.2f", key="val_pago_cond_form")
-            fecha_pago_cond = st.date_input("Fecha de Pago", key="fec_pago_cond_form")
-            concepto_pago_cond = st.text_area("Concepto (ej. Nómina quincenal, Viáticos, Anticipo)", key="con_pago_cond_form")
+            conductor_sel = st.selectbox("Seleccionar Conductor", lista_nombres_c, key=f"sel_cond_pago_form_{st.session_state['form_pago_cond_key']}")
+            monto_cond = st.number_input("Monto del Pago / Abono ($)", min_value=0.0, format="%.2f", key=f"val_pago_cond_form_{st.session_state['form_pago_cond_key']}")
+            fecha_pago_cond = st.date_input("Fecha de Pago", key=f"fec_pago_cond_form_{st.session_state['form_pago_cond_key']}")
+            concepto_pago_cond = st.text_area("Concepto (ej. Nómina quincenal, Viáticos, Anticipo)", key=f"con_pago_cond_form_{st.session_state['form_pago_cond_key']}")
             
             if st.form_submit_button("Registrar Pago a Conductor"):
                 if not lista_nombres_c:
@@ -338,6 +341,9 @@ with tab2:
                             "REF_ORIGEN": id_cond_real
                         }
                         supabase.table("BALANCE").insert(data_balance_cond).execute()
+                        
+                        # Incrementamos la llave para reiniciar y limpiar el formulario por completo
+                        st.session_state["form_pago_cond_key"] += 1
                         st.success(f"¡Pago de ${monto_cond:,.2f} a {conductor_sel} registrado y descontado del balance correctamente!")
                         st.rerun()
                     except Exception as e:

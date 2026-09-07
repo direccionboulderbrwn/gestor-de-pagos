@@ -35,17 +35,73 @@ def generar_id(prefijo="MOV"):
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     return f"{prefijo}-{timestamp}-{sufijo}"
 
+# ==========================================
+# NUEVAS FUNCIONES BACKEND PARA GESTIÓN DE NOTAS EN GITHUB
+# ==========================================
+GITHUB_TOKEN = st.secrets["github"]["token"] if "github" in st.secrets and "token" in st.secrets else None
+GITHUB_REPO = st.secrets["github"]["repo"] if "github" in st.secrets and "repo" in st.secrets else None
+FILE_PATH = "data/notas.json"
+
+def github_api_headers():
+    return {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+
+def obtener_notas_github():
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return [], None
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
+    try:
+        response = requests.get(url, headers=github_api_headers())
+        if response.status_code == 200:
+            file_data = response.json()
+            sha = file_data["sha"]
+            content_bytes = base64.b64decode(file_data["content"])
+            import json
+            notas = json.loads(content_bytes.decode("utf-8"))
+            return notas, sha
+        elif response.status_code == 404:
+            return [], None
+        else:
+            return [], None
+    except Exception:
+        return [], None
+
+def guardar_notas_github(notas, sha, mensaje_commit):
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        st.error("No se han configurado las credenciales de GitHub en los Secrets.")
+        return False
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
+    import json
+    content_str = json.dumps(notas, indent=4, ensure_ascii=False)
+    content_encoded = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
+    payload = {
+        "message": mensaje_commit,
+        "content": content_encoded
+    }
+    if sha:
+        payload["sha"] = sha
+    try:
+        response = requests.put(url, headers=github_api_headers(), json=payload)
+        return response.status_code in [200, 201]
+    except Exception:
+        return false
+
+
 # --- TÍTULO PRINCIPAL ---
 st.title("📊 Control Operativo y Financiero - TEN")
 st.markdown("---")
 
 # Pestañas principales de navegación
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "💰 Deudas por Cobrar", 
-    "📉 Deudas por Pagar", 
-    "📈 Balance Automático",
-    "👥 Clientes y Proveedores",
-    "⚠️ Penalizaciones"
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "Deudas por Cobrar", 
+    "Deudas por Pagar", 
+    "Balance Automático", 
+    "Clientes y Proveedores", 
+    "Resumen General", 
+    "Notas y Anotaciones"
 ])
 
 # ==========================================
@@ -964,3 +1020,132 @@ with tab5:
             st.info("No hay movimientos en el balance.")
     else:
         st.info("No hay conductores registrados en el sistema.")
+# ==========================================
+# TAB 6: 📝 NOTAS Y ANOTACIONES (GitHub Backend)
+# ==========================================
+with tab6:
+    st.subheader("📝 Notas y Anotaciones (Gestión en Repositorio GitHub)")
+    st.info("💡 Este módulo almacena y sincroniza las anotaciones directamente en el archivo `data/notas.json` de tu repositorio mediante commits seguros.")
+
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        st.warning("⚠️ Para utilizar este módulo, configura tus secretos de GitHub (`token` y `repo`) en el panel de Streamlit Cloud.")
+    else:
+        if "editando_nota_id" not in st.session_state:
+            st.session_state["editando_nota_id"] = None
+
+        notas_actuales, file_sha = obtener_notas_github()
+
+        es_edicion = st.session_state["editando_nota_id"] is not None
+        nota_a_editar = next((n for n in notas_actuales if n["id"] == st.session_state["editando_nota_id"]), None) if es_edicion else None
+
+        with st.form("form_gestion_notas", clear_form=not es_edicion):
+            st.markdown(f"### {'✏️ Editar Nota' if es_edicion else '➕ Nueva Anotación'}")
+            
+            titulo_input = st.text_input("Título", value=nota_a_editar["titulo"] if nota_a_editar else "")
+            
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                fecha_default = datetime.strptime(nota_a_editar["fecha_creacion"], "%Y-%m-%d").date() if nota_a_editar else date.today()
+                fecha_input = st.date_input("Fecha", value=fecha_default)
+            with col_f2:
+                categorias_sugeridas = ["Operativo", "Financiero", "Proveedores", "Clientes", "General", "Urgente"]
+                categoria_input = st.selectbox("Categoría", categorias_sugeridas, index=0)
+                cat_custom = st.text_input("O escribe otra categoría (opcional)", value="")
+                if cat_custom.strip():
+                    categoria_input = cat_custom.strip()
+
+            descripcion_input = st.text_area("Descripción", value=nota_a_editar["descripcion"] if nota_a_editar else "")
+
+            btn_texto = "Actualizar Nota" if es_edicion else "Guardar Nota"
+            submitted = st.form_submit_button(btn_texto)
+
+            if submitted:
+                if not titulo_input.strip() or not descripcion_input.strip():
+                    st.error("El título y la descripción son obligatorios.")
+                else:
+                    timestamp_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    if es_edicion:
+                        for n in notas_actuales:
+                            if n["id"] == st.session_state["editando_nota_id"]:
+                                n["titulo"] = titulo_input
+                                n["fecha_creacion"] = str(fecha_input)
+                                n["fecha_modificacion"] = timestamp_actual
+                                n["categoria"] = categoria_input
+                                n["descripcion"] = descripcion_input
+                        
+                        mensaje_commit = f"Actualizar nota: {titulo_input}"
+                        exito = guardar_notas_github(notas_actuales, file_sha, mensaje_commit)
+                        if exito:
+                            st.success("¡Nota actualizada con éxito en GitHub!")
+                            st.session_state["editando_nota_id"] = None
+                            st.rerun()
+                    else:
+                        nuevo_id = generar_id("NOTA")
+                        nueva_nota = {
+                            "id": nuevo_id,
+                            "fecha_creacion": str(fecha_input),
+                            "fecha_modificacion": timestamp_actual,
+                            "titulo": titulo_input,
+                            "categoria": categoria_input,
+                            "descripcion": descripcion_input
+                        }
+                        notas_actuales.append(nueva_nota)
+                        
+                        mensaje_commit = f"Agregar nota: {titulo_input}"
+                        exito = guardar_notas_github(notas_actuales, file_sha, mensaje_commit)
+                        if exito:
+                            st.success("¡Nota guardada con éxito en GitHub!")
+                            st.rerun()
+
+        if es_edicion:
+            if st.button("Cancelar Edición"):
+                st.session_state["editando_nota_id"] = None
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown("### 📚 Anotaciones Registradas")
+
+        if not notas_actuales:
+            st.info("No hay notas registradas en el repositorio (`data/notas.json`).")
+        else:
+            col_b1, col_b2, col_b3 = st.columns(3)
+            with col_b1:
+                busqueda = st.text_input("🔍 Buscar en notas (Título o Descripción):", value="")
+            with col_b2:
+                cats_disponibles = ["Todas"] + sorted(list(set(n.get("categoria", "General") for n in notas_actuales)))
+                filtro_cat = st.selectbox("Filtrar por Categoría:", cats_disponibles)
+            with col_b3:
+                fechas_disp = ["Todas"] + sorted(list(set(n.get("fecha_creacion", "") for n in notas_actuales)), reverse=True)
+                filtro_fec = st.selectbox("Filtrar por Fecha:", fechas_disp)
+
+            notas_filtradas = notas_actuales.copy()
+            if busqueda.strip():
+                q = busqueda.lower()
+                notas_filtradas = [n for n in notas_filtradas if q in n["titulo"].lower() or q in n["descripcion"].lower()]
+            if filtro_cat != "Todas":
+                notas_filtradas = [n for n in notas_filtradas if n.get("categoria") == filtro_cat]
+            if filtro_fec != "Todas":
+                notas_filtradas = [n for n in notas_filtradas if n.get("fecha_creacion") == filtro_fec]
+
+            st.markdown(f"Mostrando **{len(notas_filtradas)}** de **{len(notas_actuales)}** notas.")
+
+            for nota in notas_filtradas:
+                with st.expander(f"📌 [{nota.get('categoria', 'General')}] {nota.get('titulo', 'Sin título')} — *(Creada: {nota.get('fecha_creacion')})*"):
+                    st.write(f"**Descripción:**\n{nota.get('descripcion')}")
+                    st.caption(f"ID: `{nota.get('id')}` | Última modificación: {nota.get('fecha_modificacion', 'N/A')}")
+                    
+                    col_opt1, col_opt2, _ = st.columns([1, 1, 4])
+                    with col_opt1:
+                        if st.button("✏️ Editar", key=f"edit_{nota['id']}"):
+                            st.session_state["editando_nota_id"] = nota["id"]
+                            st.rerun()
+                    with col_opt2:
+                        if st.button("🗑️ Eliminar", key=f"del_{nota['id']}"):
+                            nuevas_notas = [n for n in notas_actuales if n["id"] != nota["id"]]
+                            mensaje_commit = f"Eliminar nota: {nota.get('titulo')}"
+                            _, sha_fresco = obtener_notas_github()
+                            exito_del = guardar_notas_github(nuevas_notas, sha_fresco, mensaje_commit)
+                            if exito_del:
+                                st.success(f"Nota '{nota.get('titulo')}' eliminada correctamente.")
+                                st.rerun()

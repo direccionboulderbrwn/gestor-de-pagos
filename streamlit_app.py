@@ -31,7 +31,6 @@ def fetch_table(table_name):
 
 # --- FUNCIÓN PARA GENERAR ID ÚNICO AUTOMÁTICO ---
 def generar_id(prefijo="MOV"):
-    # Genera un identificador único basado en timestamp y sufijo aleatorio corto
     sufijo = uuid.uuid4().hex[:6].upper()
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     return f"{prefijo}-{timestamp}-{sufijo}"
@@ -56,25 +55,49 @@ with tab1:
     st.subheader("Listado de Deudas por Cobrar")
     df_cobrar = fetch_table("DEUDAS_X_COBRAR")
     
-    if not df_cobrar.empty:
-        if "ESTATUS" in df_cobrar.columns:
+    if not df_cobrar.empty and "FECHA_OPERACION" in df_cobrar.columns:
+        # Extraer años/meses disponibles para el filtro de periodo
+        df_cobrar["PERIODO"] = pd.to_datetime(df_cobrar["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
+        periodos_disponibles = ["Todos"] + sorted(df_cobrar["PERIODO"].dropna().unique().tolist(), reverse=True)
+        
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            periodo_sel = st.selectbox("Seleccionar Periodo (Mes):", periodos_disponibles, key="per_cobrar")
+        with col_f2:
             estatus_list = ["Todos"] + list(df_cobrar["ESTATUS"].dropna().unique())
-            filtro = st.selectbox("Filtrar por Estatus:", estatus_list, key="filtro_cobrar")
-            if filtro != "Todos":
-                df_cobrar = df_cobrar[df_cobrar["ESTATUS"] == filtro]
-                
-        st.dataframe(df_cobrar, use_container_width=True)
+            filtro_est = st.selectbox("Filtrar por Estatus:", estatus_list, key="est_cobrar")
+            
+        # Aplicar filtros
+        df_filtrado = df_cobrar.copy()
+        if periodo_sel != "Todos":
+            df_filtrado = df_filtrado[df_filtrado["PERIODO"] == periodo_sel]
+        if filtro_est != "Todos":
+            df_filtrado = df_filtrado[df_filtrado["ESTATUS"] == filtro_est]
+            
+        # Mostrar tabla sin la columna auxiliar de periodo
+        st.dataframe(df_filtrado.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
+        
+        # --- MÓDULO DE ELIMINACIÓN ---
+        with st.expander("🗑️ Eliminar Registro de Deuda por Cobrar"):
+            ids_disponibles = df_filtrado["ID_MOVIMIENTO"].tolist() if not df_filtrado.empty else []
+            if ids_disponibles:
+                id_a_borrar = st.selectbox("Selecciona el ID de Movimiento a eliminar:", ids_disponibles, key="del_cobrar")
+                if st.button("Eliminar Registro Seleccionado", key="btn_del_cobrar"):
+                    try:
+                        supabase.table("DEUDAS_X_COBRAR").delete().eq("ID_MOVIMIENTO", id_a_borrar).execute()
+                        st.success(f"Registro {id_a_borrar} eliminado correctamente.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al eliminar: {e}")
+            else:
+                st.info("No hay registros en este periodo para eliminar.")
     else:
-        st.info("No hay registros en la tabla DEUDAS_X_COBRAR.")
+        st.info("No hay registros suficientes o falta la fecha de operación en DEUDAS_X_COBRAR.")
         
     with st.expander("➕ Registrar Nueva Deuda por Cobrar"):
-        # Generar ID automático único para esta sesión de formulario
         id_mov_auto = generar_id("CXC")
-        
         with st.form("form_nueva_deuda_cobrar"):
-            # ID visible pero no manipulable (disabled=True)
             st.text_input("ID Movimiento (Generado Automáticamente)", value=id_mov_auto, disabled=True)
-            
             venta_gasto = st.selectbox("Tipo", ["Venta", "Gasto"])
             estatus = st.selectbox("Estatus", ["Pendiente", "Pagado", "Parcial"])
             valor = st.number_input("Valor ($)", min_value=0.0, format="%.2f")
@@ -87,7 +110,6 @@ with tab1:
             concepto = st.text_area("Concepto / Detalle")
             
             submit_cobrar = st.form_submit_button("Guardar Deuda")
-            
             if submit_cobrar:
                 try:
                     data_cobrar = {
@@ -124,23 +146,46 @@ with tab2:
     st.subheader("Listado de Deudas por Pagar")
     df_pagar = fetch_table("DEUDA_X_PAGAR")
     
-    if not df_pagar.empty:
-        if "ESTATUS" in df_pagar.columns:
+    if not df_pagar.empty and "FECHA_OPERACION" in df_pagar.columns:
+        df_pagar["PERIODO"] = pd.to_datetime(df_pagar["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
+        periodos_p_disp = ["Todos"] + sorted(df_pagar["PERIODO"].dropna().unique().tolist(), reverse=True)
+        
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            periodo_sel_p = st.selectbox("Seleccionar Periodo (Mes):", periodos_p_disp, key="per_pagar")
+        with col_p2:
             estatus_list_p = ["Todos"] + list(df_pagar["ESTATUS"].dropna().unique())
-            filtro_p = st.selectbox("Filtrar por Estatus:", estatus_list_p, key="filtro_pagar")
-            if filtro_p != "Todos":
-                df_pagar = df_pagar[df_pagar["ESTATUS"] == filtro_p]
-                
-        st.dataframe(df_pagar, use_container_width=True)
+            filtro_est_p = st.selectbox("Filtrar por Estatus:", estatus_list_p, key="est_pagar")
+            
+        df_filtrado_p = df_pagar.copy()
+        if periodo_sel_p != "Todos":
+            df_filtrado_p = df_filtrado_p[df_filtrado_p["PERIODO"] == periodo_sel_p]
+        if filtro_est_p != "Todos":
+            df_filtrado_p = df_filtrado_p[df_filtrado_p["ESTATUS"] == filtro_est_p]
+            
+        st.dataframe(df_filtrado_p.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
+        
+        # --- MÓDULO DE ELIMINACIÓN ---
+        with st.expander("🗑️ Eliminar Registro de Deuda por Pagar"):
+            ids_p_disp = df_filtrado_p["ID_MOVIMIENTO"].tolist() if not df_filtrado_p.empty else []
+            if ids_p_disp:
+                id_p_a_borrar = st.selectbox("Selecciona el ID de Movimiento a eliminar:", ids_p_disp, key="del_pagar")
+                if st.button("Eliminar Registro Seleccionado", key="btn_del_pagar"):
+                    try:
+                        supabase.table("DEUDA_X_PAGAR").delete().eq("ID_MOVIMIENTO", id_p_a_borrar).execute()
+                        st.success(f"Registro {id_p_a_borrar} eliminado correctamente.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al eliminar: {e}")
+            else:
+                st.info("No hay registros en este periodo para eliminar.")
     else:
-        st.info("No hay registros en la tabla DEUDA_X_PAGAR.")
+        st.info("No hay registros suficientes o falta la fecha de operación en DEUDA_X_PAGAR.")
         
     with st.expander("➕ Registrar Nueva Deuda por Pagar"):
         id_mov_p_auto = generar_id("CXP")
-        
         with st.form("form_nueva_deuda_pagar"):
             st.text_input("ID Movimiento (Generado Automáticamente)", value=id_mov_p_auto, disabled=True)
-            
             venta_gasto_p = st.selectbox("Tipo", ["Venta", "Gasto"], key="vg_pagar")
             estatus_p = st.selectbox("Estatus", ["Pendiente", "Pagado", "Parcial"], key="est_pagar")
             valor_p = st.number_input("Valor ($)", min_value=0.0, format="%.2f", key="val_pagar")
@@ -153,7 +198,6 @@ with tab2:
             concepto_p = st.text_area("Concepto / Detalle", key="con_pagar")
             
             submit_pagar = st.form_submit_button("Guardar Deuda por Pagar")
-            
             if submit_pagar:
                 try:
                     data_pagar = {
@@ -184,15 +228,25 @@ with tab2:
                     st.error(f"Error al guardar: {e}")
 
 # ==========================================
-# TAB 3: BALANCE AUTOMÁTICO
+# TAB 3: BALANCE AUTOMÁTICO (CON FILTRO DE PERIODO)
 # ==========================================
 with tab3:
     st.subheader("📈 Balance Financiero Automático")
     df_balance = fetch_table("BALANCE")
     
-    if not df_balance.empty:
-        ingresos = df_balance[df_balance["TIPO"].str.contains("Ingreso|Cobro", case=False, na=False)]["MONTO"].sum()
-        egresos = df_balance[df_balance["TIPO"].str.contains("Egreso|Pago", case=False, na=False)]["MONTO"].sum()
+    if not df_balance.empty and "FECHA" in df_balance.columns:
+        df_balance["PERIODO"] = pd.to_datetime(df_balance["FECHA"], errors='coerce').dt.strftime('%Y-%m')
+        periodos_bal = ["Todos"] + sorted(df_balance["PERIODO"].dropna().unique().tolist(), reverse=True)
+        
+        periodo_sel_bal = st.selectbox("Filtrar Balance por Periodo (Mes):", periodos_bal, key="per_balance")
+        
+        df_bal_filtrado = df_balance.copy()
+        if periodo_sel_bal != "Todos":
+            df_bal_filtrado = df_bal_filtrado[df_bal_filtrado["PERIODO"] == periodo_sel_bal]
+            
+        # Calcular métricas basadas en el periodo filtrado
+        ingresos = df_bal_filtrado[df_bal_filtrado["TIPO"].str.contains("Ingreso|Cobro", case=False, na=False)]["MONTO"].sum()
+        egresos = df_bal_filtrado[df_bal_filtrado["TIPO"].str.contains("Egreso|Pago", case=False, na=False)]["MONTO"].sum()
         balance_neto = ingresos - egresos
         
         col1, col2, col3 = st.columns(3)
@@ -201,10 +255,10 @@ with tab3:
         col3.metric("Balance Neto", f"${balance_neto:,.2f}", delta=f"${balance_neto:,.2f}")
         st.markdown("---")
         
-        st.markdown("### Historial de Movimientos que Afectan el Balance")
-        st.dataframe(df_balance, use_container_width=True)
+        st.markdown(f"### Historial de Movimientos ({periodo_sel_bal})")
+        st.dataframe(df_bal_filtrado.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
     else:
-        st.info("Aún no hay movimientos liquidados (Pagados/Parciales) que alimenten el balance.")
+        st.info("Aún no hay movimientos liquidados que alimenten el balance.")
 
 # ==========================================
 # TAB 4: CLIENTES Y PROVEEDORES
@@ -216,6 +270,19 @@ with tab4:
         df_cli = fetch_table("CLIENTES")
         st.dataframe(df_cli, use_container_width=True)
         
+        # Eliminar Cliente
+        with st.expander("🗑️ Eliminar Cliente"):
+            ids_cli = df_cli["ID_CLIENTE"].tolist() if not df_cli.empty else []
+            if ids_cli:
+                cli_del = st.selectbox("Selecciona ID de Cliente:", ids_cli, key="del_cli")
+                if st.button("Eliminar Cliente", key="btn_del_cli"):
+                    try:
+                        supabase.table("CLIENTES").delete().eq("ID_CLIENTE", cli_del).execute()
+                        st.success("Cliente eliminado con éxito.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al eliminar (asegúrate de que no tenga deudas activas asociadas): {e}")
+                        
         with st.expander("➕ Agregar Cliente"):
             id_cli_auto = generar_id("CLI")
             with st.form("form_cliente"):
@@ -245,6 +312,19 @@ with tab4:
         df_pro = fetch_table("PROVEEDORES")
         st.dataframe(df_pro, use_container_width=True)
         
+        # Eliminar Proveedor
+        with st.expander("🗑️ Eliminar Proveedor"):
+            ids_pro = df_pro["ID_PROVEEDOR"].tolist() if not df_pro.empty else []
+            if ids_pro:
+                pro_del = st.selectbox("Selecciona ID de Proveedor:", ids_pro, key="del_pro")
+                if st.button("Eliminar Proveedor", key="btn_del_pro"):
+                    try:
+                        supabase.table("PROVEEDORES").delete().eq("ID_PROVEEDOR", pro_del).execute()
+                        st.success("Proveedor eliminado con éxito.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al eliminar: {e}")
+                        
         with st.expander("➕ Agregar Proveedor"):
             id_pro_auto = generar_id("PROV")
             with st.form("form_proveedor"):
@@ -275,8 +355,36 @@ with tab4:
 with tab5:
     st.subheader("Registro de Penalizaciones")
     df_pen = fetch_table("PENALIZACIONES")
-    st.dataframe(df_pen, use_container_width=True)
     
+    if not df_pen.empty and "FECHA" in df_pen.columns:
+        df_pen["PERIODO"] = pd.to_datetime(df_pen["FECHA"], errors='coerce').dt.strftime('%Y-%m')
+        periodos_pen = ["Todos"] + sorted(df_pen["PERIODO"].dropna().unique().tolist(), reverse=True)
+        
+        periodo_sel_pen = st.selectbox("Filtrar Penalizaciones por Periodo (Mes):", periodos_pen, key="per_pen")
+        
+        df_pen_filtrado = df_pen.copy()
+        if periodo_sel_pen != "Todos":
+            df_pen_filtrado = df_pen_filtrado[df_pen_filtrado["PERIODO"] == periodo_sel_pen]
+            
+        st.dataframe(df_pen_filtrado.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
+        
+        # --- MÓDULO DE ELIMINACIÓN ---
+        with st.expander("🗑️ Eliminar Penalización"):
+            ids_pen = df_pen_filtrado["ID_PENALIZACION"].tolist() if not df_pen_filtrado.empty else []
+            if ids_pen:
+                pen_del = st.selectbox("Selecciona ID de Penalización:", ids_pen, key="del_pen")
+                if st.button("Eliminar Penalización", key="btn_del_pen"):
+                    try:
+                        supabase.table("PENALIZACIONES").delete().eq("ID_PENALIZACION", pen_del).execute()
+                        st.success("Penalización eliminada con éxito.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al eliminar: {e}")
+            else:
+                st.info("No hay penalizaciones en este periodo para eliminar.")
+    else:
+        st.info("No hay registros en la tabla PENALIZACIONES.")
+        
     with st.expander("➕ Registrar Penalización"):
         id_pen_auto = generar_id("PEN")
         with st.form("form_penalizacion"):

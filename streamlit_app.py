@@ -369,7 +369,32 @@ with tab4:
     st.markdown("---")
     st.subheader("🚚 Conductores (Modelo Mixto - Asignados a Proveedores)")
     df_cond = fetch_table("CONDUCTORES")
+    df_pro_tabla = fetch_table("PROVEEDORES")
     
+    # Cruzar tablas para mostrar el Nombre Comercial en lugar del ID
+    if not df_cond.empty and not df_pro_tabla.empty:
+        if "ID_PROVEEDOR" in df_cond.columns and "ID_PROVEEDOR" in df_pro_tabla.columns:
+            df_cond = df_cond.merge(
+                df_pro_tabla[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]], 
+                on="ID_PROVEEDOR", 
+                how="left"
+            )
+            # Renombrar la columna para mayor claridad y moverla o reemplazarla
+            df_cond = df_cond.rename(columns={"NOMBRE_COMERCIAL": "PROVEEDOR"})
+            # Opcional: Reordenar columnas para que PROVEEDOR aparezca visiblemente claro
+            columnas_orden = [c for c in df_cond.columns if c not in ["ID_PROVEEDOR", "PROVEEDOR"]]
+            # Insertamos PROVEEDOR después del nombre del conductor
+            if "NOMBRE_CONDUCTOR" in columnas_orden:
+                idx = columnas_orden.index("NOMBRE_CONDUCTOR") + 1
+                columnas_orden.insert(idx, "PROVEEDOR")
+            else:
+                columnas_orden.append("PROVEEDOR")
+            
+            df_cond = df_cond[columnas_orden]
+            # Ocultamos la columna técnica de ID_PROVEEDOR si ya tenemos el nombre claro
+            if "ID_PROVEEDOR" in df_cond.columns:
+                df_cond = df_cond.drop(columns=["ID_PROVEEDOR"])
+
     if not df_cond.empty:
         st.dataframe(df_cond, use_container_width=True)
     else:
@@ -378,7 +403,9 @@ with tab4:
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         with st.expander("🗑️ Eliminar Conductor"):
-            ids_cond = df_cond["ID_CONDUCTOR"].tolist() if not df_cond.empty else []
+            # Recargar df_cond original sin el cruce para la eliminación segura por ID
+            df_cond_del = fetch_table("CONDUCTORES")
+            ids_cond = df_cond_del["ID_CONDUCTOR"].tolist() if not df_cond_del.empty else []
             if ids_cond:
                 cond_del = st.selectbox("Selecciona ID de Conductor:", ids_cond, key="del_cond")
                 if st.button("Eliminar Conductor", key="btn_del_cond"):
@@ -390,8 +417,8 @@ with tab4:
                         st.error(f"Error al eliminar: {e}")
             else:
                 st.info("No hay conductores para eliminar.")
-                
-    with col2:
+
+    with col_c2:
         with st.expander("➕ Registrar Conductor (Modelo Mixto)"):
             id_cond_auto = generar_id("COND")
             with st.form(f"form_conductor_{st.session_state['form_cond_key']}"):
@@ -408,7 +435,6 @@ with tab4:
                     mapa_proveedores = {}
                     lista_nombres_prov = []
                 
-                # Mostramos los nombres comerciales para que sea fácil identificarlos
                 proveedor_seleccionado_nombre = st.selectbox("Proveedor al que Pertenece", lista_nombres_prov, key=f"prov_asig_{st.session_state['form_cond_key']}")
                 
                 fecha_alta_cond = st.date_input("Fecha de Alta", key=f"fec_cond_{st.session_state['form_cond_key']}")
@@ -418,9 +444,7 @@ with tab4:
                     if not lista_nombres_prov:
                         st.error("Debes registrar al menos un proveedor antes de dar de alta conductores.")
                     else:
-                        # Obtenemos el ID real utilizando el nombre seleccionado
                         id_proveedor_real = mapa_proveedores.get(proveedor_seleccionado_nombre)
-                        
                         try:
                             supabase.table("CONDUCTORES").insert({
                                 "ID_CONDUCTOR": id_cond_auto,

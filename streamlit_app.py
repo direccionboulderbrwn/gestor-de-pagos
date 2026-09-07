@@ -140,12 +140,34 @@ with tab1:
                     st.error(f"Error al guardar: {e}")
 
 # ==========================================
-# TAB 2: DEUDAS POR PAGAR
+# TAB 2: DEUDAS POR PAGAR Y PAGOS A CONDUCTORES
 # ==========================================
 with tab2:
-    st.subheader("Listado de Deudas por Pagar")
+    st.subheader("📉 Listado de Deudas por Pagar a Proveedores")
     df_pagar = fetch_table("DEUDA_X_PAGAR")
+    df_prov_tabla = fetch_table("PROVEEDORES")
     
+    # Cruzar para mostrar el Nombre Comercial del proveedor en lugar del ID técnico
+    if not df_pagar.empty and not df_prov_tabla.empty:
+        if "PROVEEDOR" in df_pagar.columns and "ID_PROVEEDOR" in df_prov_tabla.columns:
+            df_pagar = df_pagar.merge(
+                df_prov_tabla[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]],
+                left_on="PROVEEDOR",
+                right_on="ID_PROVEEDOR",
+                how="left"
+            )
+            df_pagar = df_pagar.rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_PROVEEDOR"})
+            # Reordenar columnas para legibilidad
+            cols = [c for c in df_pagar.columns if c not in ["PROVEEDOR", "ID_PROVEEDOR", "NOMBRE_PROVEEDOR"]]
+            if "ESTATUS" in cols:
+                idx = cols.index("ESTATUS")
+                cols.insert(idx, "NOMBRE_PROVEEDOR")
+            else:
+                cols.append("NOMBRE_PROVEEDOR")
+            df_pagar = df_pagar[cols]
+            if "PROVEEDOR" in df_pagar.columns:
+                df_pagar = df_pagar.drop(columns=["PROVEEDOR"])
+
     if not df_pagar.empty and "FECHA_OPERACION" in df_pagar.columns:
         df_pagar["PERIODO"] = pd.to_datetime(df_pagar["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
         periodos_p_disp = ["Todos"] + sorted(df_pagar["PERIODO"].dropna().unique().tolist(), reverse=True)
@@ -165,7 +187,7 @@ with tab2:
             
         st.dataframe(df_filtrado_p.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
         
-        # --- MÓDULO DE ELIMINACIÓN ---
+        # --- MÓDULO DE ELIMINACIÓN DE DEUDA ---
         with st.expander("🗑️ Eliminar Registro de Deuda por Pagar"):
             ids_p_disp = df_filtrado_p["ID_MOVIMIENTO"].tolist() if not df_filtrado_p.empty else []
             if ids_p_disp:
@@ -180,9 +202,9 @@ with tab2:
             else:
                 st.info("No hay registros en este periodo para eliminar.")
     else:
-        st.info("No hay registros suficientes o falta la fecha de operación en DEUDA_X_PAGAR.")
+        st.info("No hay registros de deudas por pagar.")
         
-    with st.expander("➕ Registrar Nueva Deuda por Pagar"):
+    with st.expander("➕ Registrar Nueva Deuda por Pagar a Proveedor"):
         id_mov_p_auto = generar_id("CXP")
         with st.form("form_nueva_deuda_pagar"):
             st.text_input("ID Movimiento (Generado Automáticamente)", value=id_mov_p_auto, disabled=True)
@@ -190,42 +212,113 @@ with tab2:
             estatus_p = st.selectbox("Estatus", ["Pendiente", "Pagado", "Parcial"], key="est_pagar")
             valor_p = st.number_input("Valor ($)", min_value=0.0, format="%.2f", key="val_pagar")
             
+            # Mapeo de Proveedores por Nombre Comercial
             df_prov = fetch_table("PROVEEDORES")
-            lista_prov = df_prov["ID_PROVEEDOR"].tolist() if not df_prov.empty else []
-            proveedor = st.selectbox("Proveedor", lista_prov)
+            if not df_prov.empty:
+                mapa_provs = dict(zip(df_prov["NOMBRE_COMERCIAL"], df_prov["ID_PROVEEDOR"]))
+                lista_nombres_p = list(mapa_provs.keys())
+            else:
+                mapa_provs = {}
+                lista_nombres_p = []
+                
+            proveedor_nombre_sel = st.selectbox("Proveedor", lista_nombres_p)
             
             fecha_op_p = st.date_input("Fecha de Operación", key="fec_pagar")
             concepto_p = st.text_area("Concepto / Detalle", key="con_pagar")
             
             submit_pagar = st.form_submit_button("Guardar Deuda por Pagar")
             if submit_pagar:
-                try:
-                    data_pagar = {
-                        "ID_MOVIMIENTO": id_mov_p_auto,
-                        "VENTA_GASTO": venta_gasto_p,
-                        "ESTATUS": estatus_p,
-                        "VALOR": valor_p,
-                        "PROVEEDOR": proveedor,
-                        "FECHA_OPERACION": str(fecha_op_p),
-                        "CONCEPTO": concepto_p
-                    }
-                    supabase.table("DEUDA_X_PAGAR").insert(data_pagar).execute()
-                    
-                    if estatus_p in ["Pagado", "Parcial"]:
-                        data_balance = {
-                            "ID_BALANCE": f"BAL-{id_mov_p_auto}",
-                            "FECHA": str(fecha_op_p),
-                            "TIPO": "Egreso (Pago)",
-                            "CONCEPTO / DETALLE": f"Pago de {id_mov_p_auto} - {concepto_p}",
-                            "MONTO": valor_p,
-                            "REF_ORIGEN": id_mov_p_auto
+                if not lista_nombres_p:
+                    st.error("Primero debes registrar proveedores en el Catálogo.")
+                else:
+                    id_prov_real = mapa_provs.get(proveedor_nombre_sel)
+                    try:
+                        data_pagar = {
+                            "ID_MOVIMIENTO": id_mov_p_auto,
+                            "VENTA_GASTO": venta_gasto_p,
+                            "ESTATUS": estatus_p,
+                            "VALOR": valor_p,
+                            "PROVEEDOR": id_prov_real,
+                            "FECHA_OPERACION": str(fecha_op_p),
+                            "CONCEPTO": concepto_p
                         }
-                        supabase.table("BALANCE").insert(data_balance).execute()
+                        supabase.table("DEUDA_X_PAGAR").insert(data_pagar).execute()
                         
-                    st.success("¡Deuda por pagar registrada y reflejada en el balance!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+                        if estatus_p in ["Pagado", "Parcial"]:
+                            data_balance = {
+                                "ID_BALANCE": f"BAL-{id_mov_p_auto}",
+                                "FECHA": str(fecha_op_p),
+                                "TIPO": "Egreso (Pago Proveedor)",
+                                "CONCEPTO / DETALLE": f"Pago a {proveedor_nombre_sel} - {concepto_p}",
+                                "MONTO": valor_p,
+                                "REF_ORIGEN": id_mov_p_auto
+                            }
+                            supabase.table("BALANCE").insert(data_balance).execute()
+                            
+                        st.success("¡Deuda por pagar registrada y reflejada en el balance!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
+
+    # ==========================================
+    # SECCIÓN NUEVA: PAGOS A CONDUCTORES (MODELO MIXTO)
+    # ==========================================
+    st.markdown("---")
+    st.subheader("🚚 Control de Pagos y Abonos a Conductores (Modelo Mixto)")
+    
+    # Cargar conductores y proveedores para asociar nombres limpios
+    df_conds = fetch_table("CONDUCTORES")
+    if not df_conds.empty and not df_prov_tabla.empty:
+        df_conds = df_conds.merge(
+            df_prov_tabla[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]],
+            on="ID_PROVEEDOR",
+            how="left"
+        ).rename(columns={"NOMBRE_COMERCIAL": "PROVEEDOR_ASOCIADO"})
+        
+        # Mostrar tabla de conductores registrados con su proveedor visible
+        st.dataframe(df_conds.drop(columns=["ID_PROVEEDOR"], errors="ignore"), use_container_width=True)
+    else:
+        st.info("No hay conductores registrados en el sistema.")
+
+    with st.expander("➕ Registrar Pago o Abono a Conductor"):
+        id_pago_cond_auto = generar_id("PAG-COND")
+        with st.form("form_pago_conductor"):
+            st.text_input("ID Transacción (Automático)", value=id_pago_cond_auto, disabled=True)
+            
+            # Mapear Conductores Nombre -> ID
+            if not df_conds.empty:
+                mapa_conds = dict(zip(df_conds["NOMBRE_CONDUCTOR"], df_conds["ID_CONDUCTOR"]))
+                lista_nombres_c = list(mapa_conds.keys())
+            else:
+                mapa_conds = {}
+                lista_nombres_c = []
+                
+            conductor_sel = st.selectbox("Seleccionar Conductor", lista_nombres_c)
+            monto_cond = st.number_input("Monto del Pago / Abono ($)", min_value=0.0, format="%.2f")
+            fecha_pago_cond = st.date_input("Fecha de Pago")
+            concepto_pago_cond = st.text_area("Concepto (ej. Nómina quincenal, Viáticos, Anticipo)")
+            
+            submit_pago_cond = st.form_submit_button("Registrar Pago a Conductor")
+            if submit_pago_cond:
+                if not lista_nombres_c:
+                    st.error("No hay conductores disponibles para realizar pagos.")
+                else:
+                    id_cond_real = mapa_conds.get(conductor_sel)
+                    try:
+                        # 1. Registrar como egreso directo en la tabla BALANCE general
+                        data_balance_cond = {
+                            "ID_BALANCE": id_pago_cond_auto,
+                            "FECHA": str(fecha_pago_cond),
+                            "TIPO": "Egreso (Pago Conductor)",
+                            "CONCEPTO / DETALLE": f"Pago a Conductor: {conductor_sel} - {concepto_pago_cond}",
+                            "MONTO": monto_cond,
+                            "REF_ORIGEN": id_cond_real
+                        }
+                        supabase.table("BALANCE").insert(data_balance_cond).execute()
+                        st.success(f"¡Pago de ${monto_cond:,.2f} a {conductor_sel} registrado y descontado del balance correctamente!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al registrar el pago: {e}")
 
 # ==========================================
 # TAB 3: BALANCE AUTOMÁTICO (CON FILTRO DE PERIODO)

@@ -49,14 +49,13 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: DEUDAS POR COBRAR Y ABONOS/COBROS
+# TAB 1: DEUDAS POR COBRAR
 # ==========================================
 with tab1:
     st.subheader("💰 Listado de Deudas por Cobrar a Clientes")
     df_cobrar = fetch_table("DEUDAS_X_COBRAR")
     df_cli_tabla = fetch_table("CLIENTES")
     
-    # Cruzar para mostrar el Nombre Comercial del cliente en lugar del ID técnico
     if not df_cobrar.empty and not df_cli_tabla.empty:
         if "CLIENTE" in df_cobrar.columns and "ID_CLIENTE" in df_cli_tabla.columns:
             df_cobrar = df_cobrar.merge(
@@ -95,7 +94,6 @@ with tab1:
             
         st.dataframe(df_filtrado.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
         
-        # --- MÓDULO PARA REALIZAR ABONO / COBRAR DEUDA (LIQUIDAR) ---
         with st.expander("💵 Realizar Abono / Cobrar Deuda (Liquidar)"):
             df_pendientes_cobrar = df_cobrar[df_cobrar["ESTATUS"].isin(["Pendiente", "Parcial"])]
             ids_pendientes_cobrar = df_pendientes_cobrar["ID_MOVIMIENTO"].tolist() if not df_pendientes_cobrar.empty else []
@@ -108,7 +106,7 @@ with tab1:
                 cli_afectado = fila_deuda_c.get("NOMBRE_CLIENTE", "Cliente")
                 concepto_actual_c = fila_deuda_c.get("CONCEPTO", "")
                 
-                st.info(f"Monto Total Original de la Deuda: **${val_original_c:,.2f}** | Cliente: **{cli_afectado}**")
+                st.info(f"Monto Total de la Factura: **${val_original_c:,.2f}** | Cliente: **{cli_afectado}**")
                 
                 monto_abono_c = st.number_input("Monto del Abono / Cobro ($)", min_value=0.01, max_value=float(val_original_c), value=float(val_original_c), format="%.2f", key="input_monto_abono_cobrar")
                 fecha_abono_c = st.date_input("Fecha del Cobro", key="fec_abono_cobrar")
@@ -116,10 +114,8 @@ with tab1:
                 
                 if st.button("Confirmar Cobro / Abono", key="btn_confirmar_abono_cobrar"):
                     try:
-                        # 1. Actualizar el estatus en DEUDAS_X_COBRAR
                         supabase.table("DEUDAS_X_COBRAR").update({"ESTATUS": nuevo_estatus_c}).eq("ID_MOVIMIENTO", id_deuda_cobrar).execute()
                         
-                        # 2. Registrar automáticamente el ingreso en el BALANCE
                         id_bal_auto_c = generar_id("BAL-COBRO")
                         data_balance_cobro = {
                             "ID_BALANCE": id_bal_auto_c,
@@ -131,12 +127,12 @@ with tab1:
                         }
                         supabase.table("BALANCE").insert(data_balance_cobro).execute()
                         
-                        st.success(f"¡Cobro/Abono de ${monto_abono_c:,.2f} registrado con éxito! El movimiento ha viajado al Balance como Ingreso.")
+                        st.success(f"¡Cobro de ${monto_abono_c:,.2f} registrado y enviado al Balance como Ingreso!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al procesar el cobro: {e}")
             else:
-                st.info("No hay deudas por cobrar pendientes o parciales en este filtro para abonar.")
+                st.info("No hay deudas por cobrar pendientes o parciales en este filtro.")
 
         with st.expander("🗑️ Eliminar Registro de Deuda por Cobrar"):
             ids_disponibles = df_filtrado["ID_MOVIMIENTO"].tolist() if not df_filtrado.empty else []
@@ -154,13 +150,12 @@ with tab1:
     else:
         st.info("No hay registros suficientes en DEUDAS_X_COBRAR.")
         
-    with st.expander("➕ Registrar Nueva Deuda por Cobrar"):
+    with st.expander("➕ Registrar Nueva Deuda por Cobrar (Con Penalización, IVA y RESICO)"):
         id_mov_auto = generar_id("CXC")
         with st.form("form_nueva_deuda_cobrar"):
             st.text_input("ID Movimiento (Generado Automáticamente)", value=id_mov_auto, disabled=True, key="txt_id_cxc")
             venta_gasto = st.selectbox("Tipo", ["Venta", "Gasto"], key="vg_cxc_form")
             estatus = st.selectbox("Estatus", ["Pendiente", "Pagado", "Parcial"], key="est_cxc_form")
-            valor = st.number_input("Valor ($)", min_value=0.0, format="%.2f", key="val_cxc_form")
             
             df_clientes = fetch_table("CLIENTES")
             if not df_clientes.empty:
@@ -171,24 +166,57 @@ with tab1:
                 lista_nombres_cli = []
                 
             cliente_nombre_sel = st.selectbox("Cliente", lista_nombres_cli, key="cli_cxc_form")
-            
             fecha_op = st.date_input("Fecha de Operación", key="fec_cxc_form")
-            concepto = st.text_area("Concepto / Detalle", key="con_cxc_form")
             
-            if st.form_submit_button("Guardar Deuda"):
+            st.markdown("---")
+            st.markdown("##### 🧮 Cálculo de Importes, Penalización y Tasas Fiscales")
+            monto_base = st.number_input("Monto Base / Subtotal Factura ($)", min_value=0.0, format="%.2f", key="val_base_cxc")
+            
+            col_pen1, col_pen2 = st.columns(2)
+            with col_pen1:
+                aplica_pen_cli = st.checkbox("¿El cliente aplicó penalización a este monto?", key="chk_pen_cli")
+            with col_pen2:
+                monto_penalizacion = st.number_input("Monto Penalización ($)", min_value=0.0, format="%.2f", key="val_pen_cli") if aplica_pen_cli else 0.0
+            
+            motivo_penalizacion = st.text_input("Motivo de la Penalización (si aplica)", key="mot_pen_cli") if aplica_pen_cli else ""
+            
+            col_imp1, col_imp2 = st.columns(2)
+            with col_imp1:
+                aplicar_iva = st.checkbox("Agregar IVA (16%)", value=True, key="chk_iva_cxc")
+            with col_imp2:
+                aplicar_resico = st.checkbox("Régimen RESICO Persona Física (Retención ISR 1.25% y Retención IVA 10.66%)", value=False, key="chk_resico_cxc")
+                
+            concepto = st.text_area("Concepto / Detalle general", key="con_cxc_form")
+            
+            # --- CÁLCULO FINANCIERO Y FISCAL ---
+            subtotal_neto = max(0.0, monto_base - monto_penalizacion)
+            iva_monto = subtotal_neto * 0.16 if aplicar_iva else 0.0
+            ret_isr = subtotal_neto * 0.0125 if aplicar_resico else 0.0
+            ret_iva = subtotal_neto * (2/3 * 0.16) if aplicar_resico else 0.0
+            monto_final_neto = subtotal_neto + iva_monto - ret_isr - ret_iva
+            
+            st.info(f"💡 **Resumen Calculado:** Subtotal Neto: **${subtotal_neto:,.2f}** | IVA: **${iva_monto:,.2f}** | Retenciones: **-${(ret_isr + ret_iva):,.2f}** | **Monto Final a Facturar/Cobrar: ${monto_final_neto:,.2f}**")
+            
+            if st.form_submit_button("Guardar Deuda con Desglose Fiscal"):
                 if not lista_nombres_cli:
                     st.error("Primero debes registrar clientes en el Catálogo.")
                 else:
                     id_cli_real = mapa_clis.get(cliente_nombre_sel)
                     try:
+                        detalle_completo = f"{concepto} | Subtotal: ${monto_base:,.2f}"
+                        if aplica_penalizacion:
+                            detalle_completo += f" | Menos Penalización (${monto_penalizacion:,.2f}): {motivo_penalizacion}"
+                        if aplicar_resico:
+                            detalle_completo += f" | Retenciones RESICO aplicadas"
+
                         data_cobrar = {
                             "ID_MOVIMIENTO": id_mov_auto,
                             "VENTA_GASTO": venta_gasto,
                             "ESTATUS": estatus,
-                            "VALOR": valor,
+                            "VALOR": monto_final_neto,
                             "CLIENTE": id_cli_real,
                             "FECHA_OPERACION": str(fecha_op),
-                            "CONCEPTO": concepto
+                            "CONCEPTO": detalle_completo
                         }
                         supabase.table("DEUDAS_X_COBRAR").insert(data_cobrar).execute()
                         
@@ -197,13 +225,13 @@ with tab1:
                                 "ID_BALANCE": f"BAL-{id_mov_auto}",
                                 "FECHA": str(fecha_op),
                                 "TIPO": f"Ingreso (Cobro {estatus})",
-                                "CONCEPTO / DETALLE": f"Cobro a {cliente_nombre_sel} - {concepto}",
-                                "MONTO": valor,
+                                "CONCEPTO / DETALLE": f"Cobro neto a {cliente_nombre_sel} - {concepto}",
+                                "MONTO": monto_final_neto,
                                 "REF_ORIGEN": id_mov_auto
                             }
                             supabase.table("BALANCE").insert(data_balance).execute()
                             
-                        st.success("¡Deuda registrada y reflejada en el balance con éxito!")
+                        st.success("¡Deuda registrada con cálculo fiscal y reflejada correctamente!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
@@ -269,7 +297,7 @@ with tab2:
                 prov_afectado = fila_deuda.get("NOMBRE_PROVEEDOR", "Proveedor")
                 conCEP_actual = fila_deuda.get("CONCEPTO", "")
                 
-                st.info(f"Monto Total Original de la Deuda: **${val_original:,.2f}** | Proveedor: **{prov_afectado}**")
+                st.info(f"Monto Total de la Cuenta por Pagar: **${val_original:,.2f}** | Proveedor: **{prov_afectado}**")
                 
                 monto_abono = st.number_input("Monto del Abono / Pago ($)", min_value=0.01, max_value=float(val_original), value=float(val_original), format="%.2f", key="input_monto_abono")
                 fecha_abono = st.date_input("Fecha del Abono", key="fec_abono_pago")
@@ -284,13 +312,13 @@ with tab2:
                             "ID_BALANCE": id_bal_auto,
                             "FECHA": str(fecha_abono),
                             "TIPO": f"Egreso (Pago {nuevo_estatus})",
-                            "CONCEPTO / DETALLE": f"Abono/Pago a {prov_afectado} ({id_deuda_pagar}) - {conCEP_actual}",
+                            "CONCEPTO / DETALLE": f"Pago a {prov_afectado} ({id_deuda_pagar}) - {conCEP_actual}",
                             "MONTO": monto_abono,
                             "REF_ORIGEN": id_deuda_pagar
                         }
                         supabase.table("BALANCE").insert(data_balance_pago).execute()
                         
-                        st.success(f"¡Abono de ${monto_abono:,.2f} registrado con éxito! El movimiento ha viajado al Balance.")
+                        st.success(f"¡Pago de ${monto_abono:,.2f} registrado y enviado al Balance como Egreso!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al procesar el abono: {e}")
@@ -313,13 +341,12 @@ with tab2:
     else:
         st.info("No hay registros de deudas por pagar.")
         
-    with st.expander("➕ Registrar Nueva Deuda por Pagar a Proveedor"):
+    with st.expander("➕ Registrar Nueva Deuda por Pagar a Proveedor (Con Penalización e IVA)"):
         id_mov_p_auto = generar_id("CXP")
         with st.form("form_nueva_deuda_pagar"):
             st.text_input("ID Movimiento (Generado Automáticamente)", value=id_mov_p_auto, disabled=True, key="txt_id_cxp_form")
             venta_gasto_p = st.selectbox("Tipo", ["Venta", "Gasto"], key="vg_cxp_form")
             estatus_p = st.selectbox("Estatus", ["Pendiente", "Pagado", "Parcial"], key="est_cxp_form")
-            valor_p = st.number_input("Valor ($)", min_value=0.0, format="%.2f", key="val_cxp_form")
             
             df_prov = fetch_table("PROVEEDORES")
             if not df_prov.empty:
@@ -331,7 +358,28 @@ with tab2:
                 
             proveedor_nombre_sel = st.selectbox("Proveedor", lista_nombres_p, key="prov_cxp_form")
             fecha_op_p = st.date_input("Fecha de Operación", key="fec_cxp_form")
-            concepto_p = st.text_area("Concepto / Detalle", key="con_cxp_form")
+            
+            st.markdown("---")
+            st.markdown("##### 🧮 Cálculo de Importes, Descuentos/Penalizaciones al Proveedor e IVA")
+            monto_base_p = st.number_input("Monto Base / Subtotal Factura Proveedor ($)", min_value=0.0, format="%.2f", key="val_base_cxp")
+            
+            col_ppen1, col_ppen2 = st.columns(2)
+            with col_ppen1:
+                aplica_pen_prov = st.checkbox("¿Le apliqué penalización o descuento a este proveedor?", key="chk_pen_prov")
+            with col_ppen2:
+                monto_penalizacion_p = st.number_input("Monto de Descuento/Penalización ($)", min_value=0.0, format="%.2f", key="val_pen_prov") if aplica_pen_prov else 0.0
+                
+            motivo_penalizacion_p = st.text_input("Motivo de la penalización al proveedor", key="mot_pen_prov") if aplica_pen_prov else ""
+            
+            aplicar_iva_p = st.checkbox("Agregar IVA (16%)", value=True, key="chk_iva_cxp")
+            concepto_p = st.text_area("Concepto / Detalle general", key="con_cxp_form")
+            
+            # --- CÁLCULO FINANCIERO ---
+            subtotal_neto_p = max(0.0, monto_base_p - monto_penalizacion_p)
+            iva_monto_p = subtotal_neto_p * 0.16 if aplicar_iva_p else 0.0
+            monto_final_neto_p = subtotal_neto_p + iva_monto_p
+            
+            st.info(f"💡 **Resumen Calculado:** Subtotal Neto a Pagar: **${subtotal_neto_p:,.2f}** | IVA: **${iva_monto_p:,.2f}** | **Total Final Neto: ${monto_final_neto_p:,.2f}**")
             
             if st.form_submit_button("Guardar Deuda por Pagar"):
                 if not lista_nombres_p:
@@ -339,14 +387,18 @@ with tab2:
                 else:
                     id_prov_real = mapa_provs.get(proveedor_nombre_sel)
                     try:
+                        detalle_completo_p = f"{concepto_p} | Subtotal: ${monto_base_p:,.2f}"
+                        if aplica_penalizacion_p:
+                            detalle_completo_p += f" | Menos Penalización al proveedor (${monto_penalizacion_p:,.2f}): {motivo_penalizacion_p}"
+
                         data_pagar = {
                             "ID_MOVIMIENTO": id_mov_p_auto,
                             "VENTA_GASTO": venta_gasto_p,
                             "ESTATUS": estatus_p,
-                            "VALOR": valor_p,
+                            "VALOR": monto_final_neto_p,
                             "PROVEEDOR": id_prov_real,
                             "FECHA_OPERACION": str(fecha_op_p),
-                            "CONCEPTO": concepto_p
+                            "CONCEPTO": detalle_completo_p
                         }
                         supabase.table("DEUDA_X_PAGAR").insert(data_pagar).execute()
                         
@@ -355,8 +407,8 @@ with tab2:
                                 "ID_BALANCE": f"BAL-{id_mov_p_auto}",
                                 "FECHA": str(fecha_op_p),
                                 "TIPO": f"Egreso (Pago {estatus_p})",
-                                "CONCEPTO / DETALLE": f"Pago a {proveedor_nombre_sel} - {concepto_p}",
-                                "MONTO": valor_p,
+                                "CONCEPTO / DETALLE": f"Pago neto a {proveedor_nombre_sel} - {concepto_p}",
+                                "MONTO": monto_final_neto_p,
                                 "REF_ORIGEN": id_mov_p_auto
                             }
                             supabase.table("BALANCE").insert(data_balance).execute()
@@ -417,7 +469,6 @@ with tab2:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al registrar el pago: {e}")
-
 # ==========================================
 # TAB 3: BALANCE AUTOMÁTICO (Ajustado a la lógica correcta)
 # ==========================================
@@ -661,10 +712,11 @@ with tab4:
                             st.error(f"Error al guardar: {e}")
 
 # ==========================================
-# TAB 5: PENALIZACIONES (Lógica Corregida)
+# TAB 5: AUDITORÍA DE PENALIZACIONES
 # ==========================================
 with tab5:
-    st.subheader("⚠️ Control de Penalizaciones")
+    st.subheader("⚠️ Bitácora y Control de Penalizaciones")
+    st.info("💡 Nota: Las penalizaciones operativas ahora se aplican directamente al registrar la deuda en los Tabs 1 y 2 para calcular correctamente el neto fiscal e IVA. Este módulo sirve como bitácora de consulta y registro histórico.")
     
     tipo_penalizacion_vista = st.radio(
         "Selecciona el tipo de penalización:", 
@@ -679,7 +731,7 @@ with tab5:
     df_prov_pen = fetch_table("PROVEEDORES")
     
     if tipo_penalizacion_vista == "Penalizaciones del Cliente hacia Mí":
-        st.markdown("### 🏢 Penalizaciones Aplicadas por Clientes (Afectan como Egreso / Deducción)")
+        st.markdown("### 🏢 Bitácora de Penalizaciones por Clientes")
         
         if not df_pen.empty and "TIPO_ENTIDAD" in df_pen.columns:
             df_pen_cli = df_pen[df_pen["TIPO_ENTIDAD"] == "CLIENTE"].copy()
@@ -697,34 +749,34 @@ with tab5:
                 
             st.dataframe(df_pen_cli_filt.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
             
-            with st.expander("🗑️ Eliminar Penalización de Cliente"):
+            with st.expander("🗑️ Eliminar Registro de Penalización de Cliente"):
                 ids_pc = df_pen_cli_filt["ID_PENALIZACION"].tolist() if not df_pen_cli_filt.empty else []
                 if ids_pc:
                     id_del_pc = st.selectbox("Selecciona ID a eliminar:", ids_pc, key="del_pc_sel")
-                    if st.button("Eliminar Penalización Cliente", key="btn_del_pc"):
+                    if st.button("Eliminar Registro", key="btn_del_pc"):
                         try:
                             supabase.table("PENALIZACIONES").delete().eq("ID_PENALIZACION", id_del_pc).execute()
-                            st.success("Penalización eliminada con éxito.")
+                            st.success("Registro eliminado con éxito.")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al eliminar: {e}")
         else:
-            st.info("No hay penalizaciones de clientes registradas.")
+            st.info("No hay registros de penalizaciones de clientes.")
             
-        with st.expander("➕ Registrar Penalización de Cliente"):
+        with st.expander("➕ Registrar Penalización Histórica (Solo Bitácora)"):
             id_pen_c_auto = generar_id("PEN-CLI")
             with st.form("form_pen_cliente"):
                 st.text_input("ID Penalización", value=id_pen_c_auto, disabled=True)
                 
                 mapa_cli_p = dict(zip(df_cli_pen["NOMBRE_COMERCIAL"], df_cli_pen["ID_CLIENTE"])) if not df_cli_pen.empty else {}
                 lista_n_cli = list(mapa_cli_p.keys())
-                cli_sel_pen = st.selectbox("Cliente que Penaliza", lista_n_cli)
+                cli_sel_pen = st.selectbox("Cliente", lista_n_cli)
                 
-                fec_pen_c = st.date_input("Fecha de Penalización", key="fec_pc")
-                motivo_pen_c = st.text_area("Motivo / Detalle de la Penalización", key="mot_pc")
-                monto_pen_c = st.number_input("Monto de la Penalización ($)", min_value=0.0, format="%.2f", key="mnt_pc")
+                fec_pen_c = st.date_input("Fecha", key="fec_pc")
+                motivo_pen_c = st.text_area("Motivo / Detalle", key="mot_pc")
+                monto_pen_c = st.number_input("Monto ($)", min_value=0.0, format="%.2f", key="mnt_pc")
                 
-                if st.form_submit_button("Guardar y Enviar al Balance"):
+                if st.form_submit_button("Guardar en Bitácora"):
                     if not lista_n_cli:
                         st.error("Registra clientes primero.")
                     else:
@@ -738,24 +790,13 @@ with tab5:
                                 "MOTIVO": motivo_pen_c,
                                 "MONTO": monto_pen_c
                             }).execute()
-                            
-                            # Se registra como Egreso porque reduce nuestros ingresos esperados
-                            supabase.table("BALANCE").insert({
-                                "ID_BALANCE": f"BAL-{id_pen_c_auto}",
-                                "FECHA": str(fec_pen_c),
-                                "TIPO": "Egreso (Penalización Cliente)",
-                                "CONCEPTO / DETALLE": f"Penalización aplicada por cliente {cli_sel_pen} - {motivo_pen_c}",
-                                "MONTO": monto_pen_c,
-                                "REF_ORIGEN": id_pen_c_auto
-                            }).execute()
-                            
-                            st.success("¡Penalización registrada como deducción (egreso) en el Balance!")
+                            st.success("¡Registrado en bitácora correctamente!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar: {e}")
                             
     else:
-        st.markdown("### 🚛 Penalizaciones Aplicadas a Proveedores (Afectan como Ingreso / A favor)")
+        st.markdown("### 🚛 Bitácora de Penalizaciones a Proveedores")
         
         if not df_pen.empty and "TIPO_ENTIDAD" in df_pen.columns:
             df_pen_prov = df_pen[df_pen["TIPO_ENTIDAD"] == "PROVEEDOR"].copy()
@@ -773,34 +814,34 @@ with tab5:
                 
             st.dataframe(df_pen_prov_filt.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
             
-            with st.expander("🗑️ Eliminar Penalización a Proveedor"):
+            with st.expander("🗑️ Eliminar Registro de Penalización a Proveedor"):
                 ids_pp = df_pen_prov_filt["ID_PENALIZACION"].tolist() if not df_pen_prov_filt.empty else []
                 if ids_pp:
                     id_del_pp = st.selectbox("Selecciona ID a eliminar:", ids_pp, key="del_pp_sel")
-                    if st.button("Eliminar Penalización Proveedor", key="btn_del_pp"):
+                    if st.button("Eliminar Registro", key="btn_del_pp"):
                         try:
                             supabase.table("PENALIZACIONES").delete().eq("ID_PENALIZACION", id_del_pp).execute()
-                            st.success("Penalización eliminada con éxito.")
+                            st.success("Registro eliminado con éxito.")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al eliminar: {e}")
         else:
-            st.info("No hay penalizaciones a proveedores registradas.")
+            st.info("No hay registros de penalizaciones a proveedores.")
             
-        with st.expander("➕ Registrar Penalización a Proveedor"):
+        with st.expander("➕ Registrar Penalización Histórica (Solo Bitácora)"):
             id_pen_p_auto = generar_id("PEN-PROV")
             with st.form("form_pen_proveedor"):
                 st.text_input("ID Penalización", value=id_pen_p_auto, disabled=True)
                 
                 mapa_prov_p = dict(zip(df_prov_pen["NOMBRE_COMERCIAL"], df_prov_pen["ID_PROVEEDOR"])) if not df_prov_pen.empty else {}
                 lista_n_prov = list(mapa_prov_p.keys())
-                prov_sel_pen = st.selectbox("Proveedor al que Penalizo", lista_n_prov)
+                prov_sel_pen = st.selectbox("Proveedor", lista_n_prov)
                 
-                fec_pen_p = st.date_input("Fecha de Penalización", key="fec_pp")
-                motivo_pen_p = st.text_area("Motivo / Detalle de la Penalización", key="mot_pp")
-                monto_pen_p = st.number_input("Monto de la Penalización ($)", min_value=0.0, format="%.2f", key="mnt_pp")
+                fec_pen_p = st.date_input("Fecha", key="fec_pp")
+                motivo_pen_p = st.text_area("Motivo / Detalle", key="mot_pp")
+                monto_pen_p = st.number_input("Monto ($)", min_value=0.0, format="%.2f", key="mnt_pp")
                 
-                if st.form_submit_button("Guardar y Enviar al Balance"):
+                if st.form_submit_button("Guardar en Bitácora"):
                     if not lista_n_prov:
                         st.error("Registra proveedores primero.")
                     else:
@@ -814,18 +855,7 @@ with tab5:
                                 "MOTIVO": motivo_pen_p,
                                 "MONTO": monto_pen_p
                             }).execute()
-                            
-                            # Se registra como Ingreso porque es un dinero a nuestro favor (descuento aplicado al proveedor)
-                            supabase.table("BALANCE").insert({
-                                "ID_BALANCE": f"BAL-{id_pen_p_auto}",
-                                "FECHA": str(fec_pen_p),
-                                "TIPO": "Ingreso (Penalización Proveedor)",
-                                "CONCEPTO / DETALLE": f"Penalización aplicada a proveedor {prov_sel_pen} - {motivo_pen_p}",
-                                "MONTO": monto_pen_p,
-                                "REF_ORIGEN": id_pen_p_auto
-                            }).execute()
-                            
-                            st.success("¡Penalización registrada como ingreso/ajuste a favor en el Balance!")
+                            st.success("¡Registrado en bitácora correctamente!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar: {e}")

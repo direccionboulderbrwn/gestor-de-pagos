@@ -735,7 +735,7 @@ with tab4:
 # ==========================================
 with tab5:
     st.subheader("📊 Resumen General y Reportes Financieros")
-    st.info("💡 Este módulo concentra la auditoría de penalizaciones, el resumen de pagos por proveedor, la consolidación de ingresos/egresos y la nómina por driver, conectados con las fuentes de datos principales.")
+    st.info("💡 Este módulo concentra la auditoría de penalizaciones, el resumen de pagos por proveedor, la consolidación de ingresos/egresos, la nómina por driver y la proyección financiera al cierre.")
 
     # --- FILTROS GLOBALES PARA EL RESUMEN GENERAL ---
     st.markdown("### 🔍 Filtros Globales de Análisis")
@@ -769,11 +769,10 @@ with tab5:
     st.markdown("---")
 
     # ==========================================
-    # 1. BLOQUE DE INDICADORES GENERALES (KPIs)
+    # 1. BLOQUE DE INDICADORES FINANCIEROS (REAL ACTUAL)
     # ==========================================
-    st.markdown("### 📈 Indicadores Financieros del Periodo")
+    st.markdown("### 📈 Indicadores Financieros del Periodo (Real Actual)")
     
-    # Filtrar Balance según periodo y proveedor si aplica
     df_bal_filtrado_rg = df_bal_rg.copy()
     if not df_bal_filtrado_rg.empty and "FECHA" in df_bal_filtrado_rg.columns:
         df_bal_filtrado_rg["PERIODO"] = pd.to_datetime(df_bal_filtrado_rg["FECHA"], errors='coerce').dt.strftime('%Y-%m')
@@ -812,6 +811,58 @@ with tab5:
     st.markdown("---")
 
     # ==========================================
+    # NUEVA SECCIÓN: PROYECCIÓN FINANCIERA AL CIERRE
+    # ==========================================
+    st.markdown("### 📈 Proyección Financiera al CIERRE")
+    
+    # Calcular Pendiente por Cobrar desde TAB 1 (DEUDAS_X_COBRAR con estatus Pendiente o Parcial)
+    pendiente_cobrar = 0.0
+    if not df_cxc_rg.empty and "ESTATUS" in df_cxc_rg.columns and "VALOR" in df_cxc_rg.columns:
+        df_cxc_rg["PERIODO"] = pd.to_datetime(df_cxc_rg["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
+        df_cxc_pend = df_cxc_rg[df_cxc_rg["ESTATUS"].isin(["Pendiente", "Parcial"])].copy()
+        if filtro_periodo_rg != "Todos":
+            df_cxc_pend = df_cxc_pend[df_cxc_pend["PERIODO"] == filtro_periodo_rg]
+        pendiente_cobrar = df_cxc_pend["VALOR"].sum()
+
+    # Calcular Pendiente por Pagar desde TAB 2 (DEUDA_X_PAGAR con estatus Pendiente o Parcial)
+    pendiente_pagar = 0.0
+    if not df_cxp_rg.empty and "ESTATUS" in df_cxp_rg.columns and "VALOR" in df_cxp_rg.columns:
+        df_cxp_rg["PERIODO"] = pd.to_datetime(df_cxp_rg["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
+        df_cxp_pend = df_cxp_rg[df_cxp_rg["ESTATUS"].isin(["Pendiente", "Parcial"])].copy()
+        if filtro_periodo_rg != "Todos":
+            df_cxp_pend = df_cxp_pend[df_cxp_pend["PERIODO"] == filtro_periodo_rg]
+        if filtro_prov_rg != "Todos" and "NOMBRE_PROVEEDOR" in df_cxp_pend.columns:
+            df_cxp_pend = df_cxp_pend[df_cxp_pend["NOMBRE_PROVEEDOR"] == filtro_prov_rg]
+        pendiente_pagar = df_cxp_pend["VALOR"].sum()
+
+    ingreso_proyectado = total_ingresos_rg + pendiente_cobrar
+    egreso_proyectado = total_egresos_rg + pendiente_pagar
+    balance_proyectado = ingreso_proyectado - egreso_proyectado
+    variacion_esperada = balance_proyectado - balance_neto_rg
+
+    # Formateo visual con signo para la variación esperada
+    if variacion_esperada > 0:
+        var_str = f"+${variacion_esperada:,.2f}"
+    elif variacion_esperada < 0:
+        var_str = f"-${abs(variacion_esperada):,.2f}"
+    else:
+        var_str = "$0.00"
+
+    # Fila 1 de Proyecciones
+    p1, p2, p3 = st.columns(3)
+    p1.metric("💰 Pendiente por Cobrar", f"${pendiente_cobrar:,.2f}")
+    p2.metric("💸 Pendiente por Pagar", f"${pendiente_pagar:,.2f}")
+    p3.metric("📊 Ingreso Proyectado al Cierre", f"${ingreso_proyectado:,.2f}")
+
+    # Fila 2 de Proyecciones
+    p4, p5, p6 = st.columns(3)
+    p4.metric("📊 Egreso Proyectado al Cierre", f"${egreso_proyectado:,.2f}")
+    p5.metric("🎯 Balance Proyectado al Cierre", f"${balance_proyectado:,.2f}", delta=f"${balance_proyectado:,.2f}")
+    p6.metric("📈 Variación Esperada al Cierre", var_str, delta=var_str)
+
+    st.markdown("---")
+
+    # ==========================================
     # 2. BLOQUE DE PENALIZACIONES (Detalle actual conservado)
     # ==========================================
     st.markdown("### ⚠️ Detalle y Costo Neto de Penalizaciones")
@@ -824,7 +875,7 @@ with tab5:
     )
 
     if tipo_penalizacion_vista == "Penalizaciones del Cliente hacia Mí":
-        if not df_cxc_rg.empty and not df_cli_rg.empty:
+        if not df_cxc_rg.empty and not df_cli_rg.empty and "NOMBRE_COMERCIAL" not in df_cxc_rg.columns:
             df_cxc_rg = df_cxc_rg.merge(df_cli_rg[["ID_CLIENTE", "NOMBRE_COMERCIAL"]], left_on="CLIENTE", right_on="ID_CLIENTE", how="left").rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_CLIENTE"})
         
         if not df_cxc_rg.empty and "CONCEPTO" in df_cxc_rg.columns:
@@ -840,7 +891,7 @@ with tab5:
             else:
                 st.info("No hay penalizaciones de clientes registradas con los filtros actuales.")
     else:
-        if not df_cxp_rg.empty and not df_prov_rg.empty:
+        if not df_cxp_rg.empty and not df_prov_rg.empty and "NOMBRE_PROVEEDOR" not in df_cxp_rg.columns:
             df_cxp_rg = df_cxp_rg.merge(df_prov_rg[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]], left_on="PROVEEDOR", right_on="ID_PROVEEDOR", how="left").rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_PROVEEDOR"})
         
         if not df_cxp_rg.empty and "CONCEPTO" in df_cxp_rg.columns:
@@ -863,7 +914,6 @@ with tab5:
     # ==========================================
     st.markdown("### 🏢 Resumen de Pago por Proveedor")
     if not df_cxp_rg.empty and not df_prov_rg.empty:
-        # Asegurar cruce de proveedor comercial
         if "NOMBRE_PROVEEDOR" not in df_cxp_rg.columns:
             df_cxp_rg = df_cxp_rg.merge(df_prov_rg[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]], left_on="PROVEEDOR", right_on="ID_PROVEEDOR", how="left").rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_PROVEEDOR"})
         
@@ -876,7 +926,6 @@ with tab5:
             df_prov_resumen = df_prov_resumen[df_prov_resumen["NOMBRE_PROVEEDOR"] == filtro_prov_rg]
 
         if not df_prov_resumen.empty:
-            # Agrupación por proveedor
             resumen_prov = df_prov_resumen.groupby("NOMBRE_PROVEEDOR").agg(
                 Servicios_Generados=("VALOR", "sum"),
                 Egresos_Pagados=("VALOR", lambda x: x[df_prov_resumen.loc[x.index, "ESTATUS"] == "Pagado"].sum()),
@@ -900,7 +949,6 @@ with tab5:
     if not df_cond_rg.empty and not df_prov_rg.empty:
         df_cond_rg = df_cond_rg.merge(df_prov_rg[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]], on="ID_PROVEEDOR", how="left").rename(columns={"NOMBRE_COMERCIAL": "PROVEEDOR_ASOCIADO"})
         
-        # Cruzar con balance de pagos a conductores
         if not df_bal_cond.empty:
             pagos_drivers = df_bal_cond[df_bal_cond["TIPO"].str.contains("Pago Conductor", case=False, na=False)].copy()
             pagos_drivers["PERIODO"] = pd.to_datetime(pagos_drivers["FECHA"], errors='coerce').dt.strftime('%Y-%m')

@@ -138,7 +138,6 @@ with tab1:
 # TAB 2: DEUDAS POR PAGAR Y ABONOS/LIQUIDACIÓN
 # ==========================================
 with tab2:
-    # Inicializar contador de sesión para limpiar el formulario de pago a conductor
     if "form_pago_cond_key" not in st.session_state:
         st.session_state["form_pago_cond_key"] = 0
 
@@ -309,8 +308,6 @@ with tab2:
 
     with st.expander("➕ Registrar Pago o Abono a Conductor"):
         id_pago_cond_auto = generar_id("PAG-COND")
-        
-        # Formulario vinculado al contador de sesión para que se limpie al guardar
         with st.form(f"form_pago_conductor_{st.session_state['form_pago_cond_key']}"):
             st.text_input("ID Transacción (Automático)", value=id_pago_cond_auto, disabled=True, key=f"txt_id_pago_cond_{st.session_state['form_pago_cond_key']}")
             
@@ -341,8 +338,6 @@ with tab2:
                             "REF_ORIGEN": id_cond_real
                         }
                         supabase.table("BALANCE").insert(data_balance_cond).execute()
-                        
-                        # Incrementamos la llave para reiniciar y limpiar el formulario por completo
                         st.session_state["form_pago_cond_key"] += 1
                         st.success(f"¡Pago de ${monto_cond:,.2f} a {conductor_sel} registrado y descontado del balance correctamente!")
                         st.rerun()
@@ -350,7 +345,7 @@ with tab2:
                         st.error(f"Error al registrar el pago: {e}")
 
 # ==========================================
-# TAB 3: BALANCE AUTOMÁTICO
+# TAB 3: BALANCE AUTOMÁTICO (CON MÓDULO DE ELIMINACIÓN)
 # ==========================================
 with tab3:
     st.subheader("📈 Balance Financiero Automático")
@@ -378,6 +373,22 @@ with tab3:
         
         st.markdown(f"### Historial de Movimientos ({periodo_sel_bal})")
         st.dataframe(df_bal_filtrado.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
+        
+        # --- MÓDULO NUEVO: ELIMINAR REGISTRO DEL BALANCE ---
+        with st.expander("🗑️ Eliminar Movimiento del Balance (Corrección por Error)"):
+            ids_balance_disp = df_bal_filtrado["ID_BALANCE"].tolist() if not df_bal_filtrado.empty else []
+            if ids_balance_disp:
+                id_bal_a_borrar = st.selectbox("Selecciona el ID_BALANCE a eliminar:", ids_balance_disp, key="del_bal_sel_tab3")
+                if st.button("Eliminar del Balance (Supabase)", key="btn_del_bal_tab3"):
+                    try:
+                        # Borrado directo y garantizado en la tabla BALANCE de Supabase
+                        supabase.table("BALANCE").delete().eq("ID_BALANCE", id_bal_a_borrar).execute()
+                        st.success(f"¡El registro {id_bal_a_borrar} ha sido eliminado correctamente de Supabase y del Balance!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al eliminar el registro de Supabase: {e}")
+            else:
+                st.info("No hay movimientos en este periodo para eliminar.")
     else:
         st.info("Aún no hay movimientos liquidados que alimenten el balance.")
 

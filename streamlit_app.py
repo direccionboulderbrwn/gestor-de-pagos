@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
+from datetime import date
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
@@ -31,11 +32,11 @@ def fetch_table(table_name):
 st.title("📊 Control Operativo y Financiero - TEN")
 st.markdown("---")
 
-# Pestañas principales de navegación (¡Incluyendo BALANCE!)
+# Pestañas principales de navegación
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "💰 Deudas por Cobrar", 
     "📉 Deudas por Pagar", 
-    "📈 Balance Financiero",
+    "📈 Balance Automático",
     "👥 Clientes y Proveedores",
     "⚠️ Penalizaciones"
 ])
@@ -76,7 +77,8 @@ with tab1:
             
             if submit_cobrar:
                 try:
-                    data = {
+                    # 1. Insertar en Deudas por Cobrar
+                    data_cobrar = {
                         "ID_MOVIMIENTO": id_mov,
                         "VENTA_GASTO": venta_gasto,
                         "ESTATUS": estatus,
@@ -85,8 +87,21 @@ with tab1:
                         "FECHA_OPERACION": str(fecha_op),
                         "CONCEPTO": concepto
                     }
-                    supabase.table("DEUDAS_X_COBRAR").insert(data).execute()
-                    st.success("¡Deuda registrada con éxito en Supabase!")
+                    supabase.table("DEUDAS_X_COBRAR").insert(data_cobrar).execute()
+                    
+                    # 2. Si el estatus es Pagado o Parcial, se refleja automáticamente en BALANCE como Ingreso
+                    if estatus in ["Pagado", "Parcial"]:
+                        data_balance = {
+                            "ID_BALANCE": f"BAL-{id_mov}",
+                            "FECHA": str(fecha_op),
+                            "TIPO": "Ingreso (Cobro)",
+                            "CONCEPTO / DETALLE": f"Cobro de {id_mov} - {concepto}",
+                            "MONTO": valor,
+                            "REF_ORIGEN": id_mov
+                        }
+                        supabase.table("BALANCE").insert(data_balance).execute()
+                        
+                    st.success("¡Deuda registrada y reflejada en el balance con éxito!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
@@ -127,7 +142,8 @@ with tab2:
             
             if submit_pagar:
                 try:
-                    data = {
+                    # 1. Insertar en Deudas por Pagar
+                    data_pagar = {
                         "ID_MOVIMIENTO": id_mov_p,
                         "VENTA_GASTO": venta_gasto_p,
                         "ESTATUS": estatus_p,
@@ -136,62 +152,48 @@ with tab2:
                         "FECHA_OPERACION": str(fecha_op_p),
                         "CONCEPTO": concepto_p
                     }
-                    supabase.table("DEUDA_X_PAGAR").insert(data).execute()
-                    st.success("¡Deuda por pagar registrada con éxito!")
+                    supabase.table("DEUDA_X_PAGAR").insert(data_pagar).execute()
+                    
+                    # 2. Si se paga, se refleja automáticamente en BALANCE como Egreso
+                    if estatus_p in ["Pagado", "Parcial"]:
+                        data_balance = {
+                            "ID_BALANCE": f"BAL-{id_mov_p}",
+                            "FECHA": str(fecha_op_p),
+                            "TIPO": "Egreso (Pago)",
+                            "CONCEPTO / DETALLE": f"Pago de {id_mov_p} - {concepto_p}",
+                            "MONTO": valor_p,
+                            "REF_ORIGEN": id_mov_p
+                        }
+                        supabase.table("BALANCE").insert(data_balance).execute()
+                        
+                    st.success("¡Deuda por pagar registrada y reflejada en el balance!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
 
 # ==========================================
-# TAB 3: BALANCE FINANCIERO (NUEVO)
+# TAB 3: BALANCE AUTOMÁTICO
 # ==========================================
 with tab3:
-    st.subheader("📈 Estado de Resultados y Balance General")
+    st.subheader("📈 Balance Financiero Automático")
     df_balance = fetch_table("BALANCE")
     
     if not df_balance.empty:
-        # Métricas rápidas si existen columnas de tipo y monto
-        if "TIPO" in df_balance.columns and "MONTO" in df_balance.columns:
-            ingresos = df_balance[df_balance["TIPO"].str.lower().isin(["ingreso", "venta", "cobro"])]["MONTO"].sum()
-            egresos = df_balance[df_balance["TIPO"].str.lower().isin(["egreso", "gasto", "pago"])]["MONTO"].sum()
-            balance_neto = ingresos - egresos
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Ingresos", f"${ingresos:,.2f}")
-            col2.metric("Total Egresos", f"${egresos:,.2f}")
-            col3.metric("Balance Neto", f"${balance_neto:,.2f}", delta=f"${balance_neto:,.2f}")
-            st.markdown("---")
-            
+        # Calcular ingresos y egresos basados en los registros automáticos
+        ingresos = df_balance[df_balance["TIPO"].str.contains("Ingreso|Cobro", case=False, na=False)]["MONTO"].sum()
+        egresos = df_balance[df_balance["TIPO"].str.contains("Egreso|Pago", case=False, na=False)]["MONTO"].sum()
+        balance_neto = ingresos - egresos
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Cobrado (Ingresos)", f"${ingresos:,.2f}")
+        col2.metric("Total Pagado (Egresos)", f"${egresos:,.2f}")
+        col3.metric("Balance Neto", f"${balance_neto:,.2f}", delta=f"${balance_neto:,.2f}")
+        st.markdown("---")
+        
+        st.markdown("### Historial de Movimientos que Afectan el Balance")
         st.dataframe(df_balance, use_container_width=True)
     else:
-        st.info("No hay registros en la tabla BALANCE.")
-        
-    with st.expander("➕ Registrar Movimiento en Balance"):
-        with st.form("form_balance"):
-            id_bal = st.text_input("ID Balance (ej. BAL-001)")
-            fecha_bal = st.date_input("Fecha de Movimiento", key="fec_bal")
-            tipo_bal = st.selectbox("Tipo de Movimiento", ["Ingreso", "Egreso", "Gasto", "Venta"])
-            concepto_bal = st.text_input("Concepto / Detalle")
-            monto_bal = st.number_input("Monto ($)", min_value=0.0, format="%.2f", key="mnt_bal")
-            ref_bal = st.text_input("Referencia Origen (Opcional)")
-            
-            submit_bal = st.form_submit_button("Guardar en Balance")
-            
-            if submit_bal:
-                try:
-                    data = {
-                        "ID_BALANCE": id_bal,
-                        "FECHA": str(fecha_bal),
-                        "TIPO": tipo_bal,
-                        "CONCEPTO / DETALLE": concepto_bal,
-                        "MONTO": monto_bal,
-                        "REF_ORIGEN": ref_bal
-                    }
-                    supabase.table("BALANCE").insert(data).execute()
-                    st.success("¡Movimiento guardado en Balance con éxito!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+        st.info("Aún no hay movimientos liquidados (Pagados/Parciales) que alimenten el balance.")
 
 # ==========================================
 # TAB 4: CLIENTES Y PROVEEDORES

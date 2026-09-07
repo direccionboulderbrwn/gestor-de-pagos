@@ -419,7 +419,7 @@ with tab2:
                         st.error(f"Error al registrar el pago: {e}")
 
 # ==========================================
-# TAB 3: BALANCE AUTOMÁTICO
+# TAB 3: BALANCE AUTOMÁTICO (Actualizado para reflejar Penalizaciones)
 # ==========================================
 with tab3:
     st.subheader("📈 Balance Financiero Automático")
@@ -435,13 +435,13 @@ with tab3:
         if periodo_sel_bal != "Todos":
             df_bal_filtrado = df_bal_filtrado[df_bal_filtrado["PERIODO"] == periodo_sel_bal]
             
-        ingresos = df_bal_filtrado[df_bal_filtrado["TIPO"].str.contains("Ingreso|Cobro", case=False, na=False)]["MONTO"].sum()
-        egresos = df_bal_filtrado[df_bal_filtrado["TIPO"].str.contains("Egreso|Pago", case=False, na=False)]["MONTO"].sum()
+        ingresos = df_bal_filtrado[df_bal_filtrado["TIPO"].str.contains("Ingreso|Cobro|Penalización Cliente", case=False, na=False)]["MONTO"].sum()
+        egresos = df_bal_filtrado[df_bal_filtrado["TIPO"].str.contains("Egreso|Pago|Penalización Proveedor", case=False, na=False)]["MONTO"].sum()
         balance_neto = ingresos - egresos
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("Total Cobrado (Ingresos)", f"${ingresos:,.2f}")
-        col2.metric("Total Pagado (Egresos)", f"${egresos:,.2f}")
+        col1.metric("Total Ingresos", f"${ingresos:,.2f}")
+        col2.metric("Total Egresos", f"${egresos:,.2f}")
         col3.metric("Balance Neto", f"${balance_neto:,.2f}", delta=f"${balance_neto:,.2f}")
         st.markdown("---")
         
@@ -449,7 +449,7 @@ with tab3:
         st.dataframe(df_bal_filtrado.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
         
         with st.expander("🗑️ Eliminar Movimiento del Balance (Corrección por Error)"):
-            ids_balance_disp = df_bal_filtrado["ID_BALANCE"].tolist() if not df_bal_filtrado.empty else []
+            ids_balance_disp = df_bal_filtrado["ID_BALANCE"].tolist() if not df_balance.empty else []
             if ids_balance_disp:
                 id_bal_a_borrar = st.selectbox("Selecciona el ID_BALANCE a eliminar:", ids_balance_disp, key="del_bal_sel_tab3")
                 if st.button("Eliminar del Balance (Supabase)", key="btn_del_bal_tab3"):
@@ -458,12 +458,11 @@ with tab3:
                         st.success(f"¡El registro {id_bal_a_borrar} ha sido eliminado correctamente de Supabase y del Balance!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error al eliminar el registro de Supabase: {e}")
+                        st.error(f"Error al eliminar de Supabase: {e}")
             else:
                 st.info("No hay movimientos en este periodo para eliminar.")
     else:
         st.info("Aún no hay movimientos liquidados que alimenten el balance.")
-
 # ==========================================
 # TAB 4: CLIENTES, PROVEEDORES Y CONDUCTORES
 # ==========================================
@@ -654,59 +653,175 @@ with tab4:
                             st.error(f"Error al guardar: {e}")
 
 # ==========================================
-# TAB 5: PENALIZACIONES
+# TAB 5: PENALIZACIONES (Clientes vs Proveedores)
 # ==========================================
 with tab5:
-    st.subheader("Registro de Penalizaciones")
-    df_pen = fetch_table("PENALIZACIONES")
+    st.subheader("⚠️ Control de Penalizaciones")
     
-    if not df_pen.empty and "FECHA" in df_pen.columns:
-        df_pen["PERIODO"] = pd.to_datetime(df_pen["FECHA"], errors='coerce').dt.strftime('%Y-%m')
-        periodos_pen = ["Todos"] + sorted(df_pen["PERIODO"].dropna().unique().tolist(), reverse=True)
+    # Selector interno para alternar la vista y registro
+    tipo_penalizacion_vista = st.radio(
+        "Selecciona el tipo de penalización:", 
+        ["Penalizaciones del Cliente hacia Mí", "Penalizaciones mías hacia el Proveedor"],
+        horizontal=True,
+        key="radio_tipo_pen"
+    )
+    
+    st.markdown("---")
+    df_pen = fetch_table("PENALIZACIONES")
+    df_cli_pen = fetch_table("CLIENTES")
+    df_prov_pen = fetch_table("PROVEEDORES")
+    
+    if tipo_penalizacion_vista == "Penalizaciones del Cliente hacia Mí":
+        st.markdown("### 🏢 Penalizaciones Aplicadas por Clientes")
         
-        periodo_sel_pen = st.selectbox("Filtrar Penalizaciones por Periodo (Mes):", periodos_pen, key="per_pen_tab5")
-        
-        df_pen_filtrado = df_pen.copy()
-        if periodo_sel_pen != "Todos":
-            df_pen_filtrado = df_pen_filtrado[df_pen_filtrado["PERIODO"] == periodo_sel_pen]
+        # Filtrar o mapear nombres si existe la columna de entidad
+        if not df_pen.empty and "TIPO_ENTIDAD" in df_pen.columns:
+            df_pen_cli = df_pen[df_pen["TIPO_ENTIDAD"] == "CLIENTE"].copy()
+        else:
+            df_pen_cli = df_pen.copy() if not df_pen.empty else pd.DataFrame()
             
-        st.dataframe(df_pen_filtrado.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
-        
-        with st.expander("🗑️ Eliminar Penalización"):
-            ids_pen = df_pen_filtrado["ID_PENALIZACION"].tolist() if not df_pen_filtrado.empty else []
-            if ids_pen:
-                pen_del = st.selectbox("Selecciona ID de Penalización:", ids_pen, key="del_pen_sel_tab5")
-                if st.button("Eliminar Penalización", key="btn_del_pen_tab5"):
-                    try:
-                        supabase.table("PENALIZACIONES").delete().eq("ID_PENALIZACION", pen_del).execute()
-                        st.success("Penalización eliminada con éxito.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al eliminar: {e}")
-            else:
-                st.info("No hay penalizaciones en este periodo para eliminar.")
+        if not df_pen_cli.empty and "FECHA" in df_pen_cli.columns:
+            df_pen_cli["PERIODO"] = pd.to_datetime(df_pen_cli["FECHA"], errors='coerce').dt.strftime('%Y-%m')
+            per_pen_c = ["Todos"] + sorted(df_pen_cli["PERIODO"].dropna().unique().tolist(), reverse=True)
+            sel_per_pc = st.selectbox("Filtrar por Periodo (Mes):", per_pen_c, key="per_pen_cli")
+            
+            df_pen_cli_filt = df_pen_cli.copy()
+            if sel_per_pc != "Todos":
+                df_pen_cli_filt = df_pen_cli_filt[df_pen_cli_filt["PERIODO"] == sel_per_pc]
+                
+            st.dataframe(df_pen_cli_filt.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
+            
+            with st.expander("🗑️ Eliminar Penalización de Cliente"):
+                ids_pc = df_pen_cli_filt["ID_PENALIZACION"].tolist() if not df_pen_cli_filt.empty else []
+                if ids_pc:
+                    id_del_pc = st.selectbox("Selecciona ID a eliminar:", ids_pc, key="del_pc_sel")
+                    if st.button("Eliminar Penalización Cliente", key="btn_del_pc"):
+                        try:
+                            supabase.table("PENALIZACIONES").delete().eq("ID_PENALIZACION", id_del_pc).execute()
+                            st.success("Penalización eliminada con éxito.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al eliminar: {e}")
+        else:
+            st.info("No hay penalizaciones de clientes registradas.")
+            
+        with st.expander("➕ Registrar Penalización de Cliente (Afecta Balance como Egreso/Ajuste)"):
+            id_pen_c_auto = generar_id("PEN-CLI")
+            with st.form("form_pen_cliente"):
+                st.text_input("ID Penalización", value=id_pen_c_auto, disabled=True)
+                
+                mapa_cli_p = dict(zip(df_cli_pen["NOMBRE_COMERCIAL"], df_cli_pen["ID_CLIENTE"])) if not df_cli_pen.empty else {}
+                lista_n_cli = list(mapa_cli_p.keys())
+                cli_sel_pen = st.selectbox("Cliente que Penaliza", lista_n_cli)
+                
+                fec_pen_c = st.date_input("Fecha de Penalización", key="fec_pc")
+                motivo_pen_c = st.text_area("Motivo / Detalle de la Penalización", key="mot_pc")
+                monto_pen_c = st.number_input("Monto de la Penalización ($)", min_value=0.0, format="%.2f", key="mnt_pc")
+                
+                if st.form_submit_button("Guardar y Enviar al Balance"):
+                    if not lista_n_cli:
+                        st.error("Registra clientes primero.")
+                    else:
+                        id_cli_real = mapa_cli_p.get(cli_sel_pen)
+                        try:
+                            # 1. Guardar en tabla penalizaciones
+                            supabase.table("PENALIZACIONES").insert({
+                                "ID_PENALIZACION": id_pen_c_auto,
+                                "TIPO_ENTIDAD": "CLIENTE",
+                                "ID_AFECTADO": id_cli_real,
+                                "FECHA": str(fec_pen_c),
+                                "MOTIVO": motivo_pen_c,
+                                "MONTO": monto_pen_c
+                            }).execute()
+                            
+                            # 2. Reflejar automáticamente en el Balance como Egreso/Descuento
+                            supabase.table("BALANCE").insert({
+                                "ID_BALANCE": f"BAL-{id_pen_c_auto}",
+                                "FECHA": str(fec_pen_c),
+                                "TIPO": "Egreso (Penalización Cliente)",
+                                "CONCEPTO / DETALLE": f"Penalización aplicada por cliente {cli_sel_pen} - {motivo_pen_c}",
+                                "MONTO": monto_pen_c,
+                                "REF_ORIGEN": id_pen_c_auto
+                            }).execute()
+                            
+                            st.success("¡Penalización de cliente registrada y enviada al Balance!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
+                            
     else:
-        st.info("No hay registros en la tabla PENALIZACIONES.")
+        st.markdown("### 🚛 Penalizaciones Aplicadas a Proveedores")
         
-    with st.expander("➕ Registrar Penalización"):
-        id_pen_auto = generar_id("PEN")
-        with st.form("form_penalizacion"):
-            st.text_input("ID Penalización (Generado Automáticamente)", value=id_pen_auto, disabled=True, key="txt_id_pen_form")
-            tipo_pen = st.text_input("Tipo de Penalización", key="tipo_pen_form")
-            fecha_pen = st.date_input("Fecha", key="fec_pen_form")
-            motivo_pen = st.text_area("Motivo", key="motivo_pen_form")
-            monto_pen = st.number_input("Monto ($)", min_value=0.0, format="%.2f", key="val_pen_form")
+        if not df_pen.empty and "TIPO_ENTIDAD" in df_pen.columns:
+            df_pen_prov = df_pen[df_pen["TIPO_ENTIDAD"] == "PROVEEDOR"].copy()
+        else:
+            df_pen_prov = pd.DataFrame()
             
-            if st.form_submit_button("Guardar Penalización"):
-                try:
-                    supabase.table("PENALIZACIONES").insert({
-                        "ID_PENALIZACION": id_pen_auto,
-                        "TIPO": tipo_pen,
-                        "FECHA": str(fecha_pen),
-                        "MOTIVO": motivo_pen,
-                        "MONTO": monto_pen
-                    }).execute()
-                    st.success("Penalización registrada con éxito")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+        if not df_pen_prov.empty and "FECHA" in df_pen_prov.columns:
+            df_pen_prov["PERIODO"] = pd.to_datetime(df_pen_prov["FECHA"], errors='coerce').dt.strftime('%Y-%m')
+            per_pen_p = ["Todos"] + sorted(df_pen_prov["PERIODO"].dropna().unique().tolist(), reverse=True)
+            sel_per_pp = st.selectbox("Filtrar por Periodo (Mes):", per_pen_p, key="per_pen_prov")
+            
+            df_pen_prov_filt = df_pen_prov.copy()
+            if sel_per_pp != "Todos":
+                df_pen_prov_filt = df_pen_prov_filt[df_pen_prov_filt["PERIODO"] == sel_per_pp]
+                
+            st.dataframe(df_pen_prov_filt.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
+            
+            with st.expander("🗑️ Eliminar Penalización a Proveedor"):
+                ids_pp = df_pen_prov_filt["ID_PENALIZACION"].tolist() if not df_pen_prov_filt.empty else []
+                if ids_pp:
+                    id_del_pp = st.selectbox("Selecciona ID a eliminar:", ids_pp, key="del_pp_sel")
+                    if st.button("Eliminar Penalización Proveedor", key="btn_del_pp"):
+                        try:
+                            supabase.table("PENALIZACIONES").delete().eq("ID_PENALIZACION", id_del_pp).execute()
+                            st.success("Penalización eliminada con éxito.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al eliminar: {e}")
+        else:
+            st.info("No hay penalizaciones a proveedores registradas.")
+            
+        with st.expander("➕ Registrar Penalización a Proveedor (Afecta Balance como Ingreso/Ajuste a Favor)"):
+            id_pen_p_auto = generar_id("PEN-PROV")
+            with st.form("form_pen_proveedor"):
+                st.text_input("ID Penalización", value=id_pen_p_auto, disabled=True)
+                
+                mapa_prov_p = dict(zip(df_prov_pen["NOMBRE_COMERCIAL"], df_prov_pen["ID_PROVEEDOR"])) if not df_prov_pen.empty else {}
+                lista_n_prov = list(mapa_prov_p.keys())
+                prov_sel_pen = st.selectbox("Proveedor al que Penalizo", lista_n_prov)
+                
+                fec_pen_p = st.date_input("Fecha de Penalización", key="fec_pp")
+                motivo_pen_p = st.text_area("Motivo / Detalle de la Penalización", key="mot_pp")
+                monto_pen_p = st.number_input("Monto de la Penalización ($)", min_value=0.0, format="%.2f", key="mnt_pp")
+                
+                if st.form_submit_button("Guardar y Enviar al Balance"):
+                    if not lista_n_prov:
+                        st.error("Registra proveedores primero.")
+                    else:
+                        id_prov_real = mapa_prov_p.get(prov_sel_pen)
+                        try:
+                            # 1. Guardar en tabla penalizaciones
+                            supabase.table("PENALIZACIONES").insert({
+                                "ID_PENALIZACION": id_pen_p_auto,
+                                "TIPO_ENTIDAD": "PROVEEDOR",
+                                "ID_AFECTADO": id_prov_real,
+                                "FECHA": str(fec_pen_p),
+                                "MOTIVO": motivo_pen_p,
+                                "MONTO": monto_pen_p
+                            }).execute()
+                            
+                            # 2. Reflejar automáticamente en el Balance como Ingreso (por descuento o compensación a favor)
+                            supabase.table("BALANCE").insert({
+                                "ID_BALANCE": f"BAL-{id_pen_p_auto}",
+                                "FECHA": str(fec_pen_p),
+                                "TIPO": "Ingreso (Penalización Proveedor)",
+                                "CONCEPTO / DETALLE": f"Penalización aplicada a proveedor {prov_sel_pen} - {motivo_pen_p}",
+                                "MONTO": monto_pen_p,
+                                "REF_ORIGEN": id_pen_p_auto
+                            }).execute()
+                            
+                            st.success("¡Penalización a proveedor registrada y enviada al Balance!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")

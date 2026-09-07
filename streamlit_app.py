@@ -739,150 +739,92 @@ with tab4:
                             st.error(f"Error al guardar: {e}")
 
 # ==========================================
-# TAB 5: AUDITORÍA DE PENALIZACIONES
+# TAB 5: AUDITORÍA Y CONTROL UNIFICADO DE PENALIZACIONES
 # ==========================================
 with tab5:
-    st.subheader("⚠️ Bitácora y Control de Penalizaciones")
-    st.info("💡 Nota: Las penalizaciones operativas ahora se aplican directamente al registrar la deuda en los Tabs 1 y 2 para calcular correctamente el neto fiscal e IVA. Este módulo sirve como bitácora de consulta y registro histórico.")
-    
-    tipo_penalizacion_vista = st.radio(
-        "Selecciona el tipo de penalización:", 
-        ["Penalizaciones del Cliente hacia Mí", "Penalizaciones mías hacia el Proveedor"],
+    st.subheader("⚠️ Auditoría y Control Consolidado de Penalizaciones")
+    st.info("💡 Este módulo extrae y consolida automáticamente todas las penalizaciones aplicadas en Deudas por Cobrar (Clientes) y Deudas por Pagar (Proveedores), respetando la fuente original sin duplicar registros y reflejando su impacto en las deducciones.")
+
+    # Selector de vista
+    tipo_pen_vista = st.radio(
+        "Seleccionar origen de penalizaciones:",
+        ["Penalizaciones Aplicadas por Clientes (Tab 1)", "Penalizaciones Aplicadas a Proveedores (Tab 2)"],
         horizontal=True,
-        key="radio_tipo_pen"
+        key="radio_tipo_pen_audit"
     )
-    
     st.markdown("---")
-    df_pen = fetch_table("PENALIZACIONES")
-    df_cli_pen = fetch_table("CLIENTES")
-    df_prov_pen = fetch_table("PROVEEDORES")
-    
-    if tipo_penalizacion_vista == "Penalizaciones del Cliente hacia Mí":
-        st.markdown("### 🏢 Bitácora de Penalizaciones por Clientes")
+
+    df_cxc_audit = fetch_table("DEUDAS_X_COBRAR")
+    df_cxp_audit = fetch_table("DEUDA_X_PAGAR")
+    df_cli_audit = fetch_table("CLIENTES")
+    df_prov_audit = fetch_table("PROVEEDORES")
+
+    if tipo_pen_vista == "Penalizaciones Aplicadas por Clientes (Tab 1)":
+        st.markdown("### 🏢 Penalizaciones Registradas en Clientes")
         
-        if not df_pen.empty and "TIPO_ENTIDAD" in df_pen.columns:
-            df_pen_cli = df_pen[df_pen["TIPO_ENTIDAD"] == "CLIENTE"].copy()
+        if not df_cxc_audit.empty and not df_cli_audit.empty:
+            df_cxc_audit = df_cxc_audit.merge(
+                df_cli_audit[["ID_CLIENTE", "NOMBRE_COMERCIAL"]],
+                left_on="CLIENTE",
+                right_on="ID_CLIENTE",
+                how="left"
+            ).rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_CLIENTE"})
+
+        if not df_cxc_audit.empty and "CONCEPTO" in df_cxc_audit.columns:
+            # Filtrar registros que contengan penalizaciones en su concepto
+            df_pen_cxc = df_cxc_audit[df_cxc_audit["CONCEPTO"].str.contains("Penalización|Total Penalizaciones", case=False, na=False)].copy()
+            
+            if not df_pen_cxc.empty:
+                df_pen_cxc["PERIODO"] = pd.to_datetime(df_pen_cxc["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
+                
+                # Filtro de Periodo
+                per_c = ["Todos"] + sorted(df_pen_cxc["PERIODO"].dropna().unique().tolist(), reverse=True)
+                sel_per_c = st.selectbox("Filtrar por Periodo (Mes):", per_c, key="sel_per_audit_c")
+                
+                if sel_per_c != "Todos":
+                    df_pen_cxc = df_pen_cxc[df_pen_cxc["PERIODO"] == sel_per_c]
+                
+                # Mostrar métrica del total de penalizaciones de cliente en este filtro
+                total_pen_c = df_pen_cxc["VALOR"].sum() # Referencia analítica
+                st.metric("Total Registros con Penalización de Cliente (Filtrados)", len(df_pen_cxc))
+                
+                # Seleccionar columnas clave para visualización clara
+                cols_mostrar = [c for c in ["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_CLIENTE", "ESTATUS", "VALOR", "CONCEPTO"] if c in df_pen_cxc.columns]
+                st.dataframe(df_pen_cxc[cols_mostrar], use_container_width=True)
+            else:
+                st.info("No se encontraron registros de deudas con penalizaciones de clientes asociadas.")
         else:
-            df_pen_cli = pd.DataFrame()
-            
-        if not df_pen_cli.empty and "FECHA" in df_pen_cli.columns:
-            df_pen_cli["PERIODO"] = pd.to_datetime(df_pen_cli["FECHA"], errors='coerce').dt.strftime('%Y-%m')
-            per_pen_c = ["Todos"] + sorted(df_pen_cli["PERIODO"].dropna().unique().tolist(), reverse=True)
-            sel_per_pc = st.selectbox("Filtrar por Periodo (Mes):", per_pen_c, key="per_pen_cli")
-            
-            df_pen_cli_filt = df_pen_cli.copy()
-            if sel_per_pc != "Todos":
-                df_pen_cli_filt = df_pen_cli_filt[df_pen_cli_filt["PERIODO"] == sel_per_pc]
-                
-            st.dataframe(df_pen_cli_filt.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
-            
-            with st.expander("🗑️ Eliminar Registro de Penalización de Cliente"):
-                ids_pc = df_pen_cli_filt["ID_PENALIZACION"].tolist() if not df_pen_cli_filt.empty else []
-                if ids_pc:
-                    id_del_pc = st.selectbox("Selecciona ID a eliminar:", ids_pc, key="del_pc_sel")
-                    if st.button("Eliminar Registro", key="btn_del_pc"):
-                        try:
-                            supabase.table("PENALIZACIONES").delete().eq("ID_PENALIZACION", id_del_pc).execute()
-                            st.success("Registro eliminado con éxito.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al eliminar: {e}")
-        else:
-            st.info("No hay registros de penalizaciones de clientes.")
-            
-        with st.expander("➕ Registrar Penalización Histórica (Solo Bitácora)"):
-            id_pen_c_auto = generar_id("PEN-CLI")
-            with st.form("form_pen_cliente"):
-                st.text_input("ID Penalización", value=id_pen_c_auto, disabled=True)
-                
-                mapa_cli_p = dict(zip(df_cli_pen["NOMBRE_COMERCIAL"], df_cli_pen["ID_CLIENTE"])) if not df_cli_pen.empty else {}
-                lista_n_cli = list(mapa_cli_p.keys())
-                cli_sel_pen = st.selectbox("Cliente", lista_n_cli)
-                
-                fec_pen_c = st.date_input("Fecha", key="fec_pc")
-                motivo_pen_c = st.text_area("Motivo / Detalle", key="mot_pc")
-                monto_pen_c = st.number_input("Monto ($)", min_value=0.0, format="%.2f", key="mnt_pc")
-                
-                if st.form_submit_button("Guardar en Bitácora"):
-                    if not lista_n_cli:
-                        st.error("Registra clientes primero.")
-                    else:
-                        id_cli_real = mapa_cli_p.get(cli_sel_pen)
-                        try:
-                            supabase.table("PENALIZACIONES").insert({
-                                "ID_PENALIZACION": id_pen_c_auto,
-                                "TIPO_ENTIDAD": "CLIENTE",
-                                "ID_AFECTADO": id_cli_real,
-                                "FECHA": str(fec_pen_c),
-                                "MOTIVO": motivo_pen_c,
-                                "MONTO": monto_pen_c
-                            }).execute()
-                            st.success("¡Registrado en bitácora correctamente!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al guardar: {e}")
-                            
+            st.info("No hay datos suficientes en Deudas por Cobrar.")
+
     else:
-        st.markdown("### 🚛 Bitácora de Penalizaciones a Proveedores")
+        st.markdown("### 🚛 Penalizaciones Registradas a Proveedores")
         
-        if not df_pen.empty and "TIPO_ENTIDAD" in df_pen.columns:
-            df_pen_prov = df_pen[df_pen["TIPO_ENTIDAD"] == "PROVEEDOR"].copy()
+        if not df_cxp_audit.empty and not df_prov_audit.empty:
+            df_cxp_audit = df_cxp_audit.merge(
+                df_prov_audit[["ID_PROVEEDOR", "NOMBRE_COMERCIAL"]],
+                left_on="PROVEEDOR",
+                right_on="ID_PROVEEDOR",
+                how="left"
+            ).rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_PROVEEDOR"})
+
+        if not df_cxp_audit.empty and "CONCEPTO" in df_cxp_audit.columns:
+            df_pen_cxp = df_cxp_audit[df_cxp_audit["CONCEPTO"].str.contains("Penalización|Menos Penalización|Descuento", case=False, na=False)].copy()
+            
+            if not df_pen_cxp.empty:
+                df_pen_cxp["PERIODO"] = pd.to_datetime(df_pen_cxp["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
+                
+                # Filtro de Periodo
+                per_p = ["Todos"] + sorted(df_pen_cxp["PERIODO"].dropna().unique().tolist(), reverse=True)
+                sel_per_p = st.selectbox("Filtrar por Periodo (Mes):", per_p, key="sel_per_audit_p")
+                
+                if sel_per_p != "Todos":
+                    df_pen_cxp = df_pen_cxp[df_pen_cxp["PERIODO"] == sel_per_p]
+                
+                st.metric("Total Registros con Penalización a Proveedor (Filtrados)", len(df_pen_cxp))
+                
+                cols_mostrar_p = [c for c in ["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_PROVEEDOR", "ESTATUS", "VALOR", "CONCEPTO"] if c in df_pen_cxp.columns]
+                st.dataframe(df_pen_cxp[cols_mostrar_p], use_container_width=True)
+            else:
+                st.info("No se encontraron registros de deudas con penalizaciones a proveedores asociadas.")
         else:
-            df_pen_prov = pd.DataFrame()
-            
-        if not df_pen_prov.empty and "FECHA" in df_pen_prov.columns:
-            df_pen_prov["PERIODO"] = pd.to_datetime(df_pen_prov["FECHA"], errors='coerce').dt.strftime('%Y-%m')
-            per_pen_p = ["Todos"] + sorted(df_pen_prov["PERIODO"].dropna().unique().tolist(), reverse=True)
-            sel_per_pp = st.selectbox("Filtrar por Periodo (Mes):", per_pen_p, key="per_pen_prov")
-            
-            df_pen_prov_filt = df_pen_prov.copy()
-            if sel_per_pp != "Todos":
-                df_pen_prov_filt = df_pen_prov_filt[df_pen_prov_filt["PERIODO"] == sel_per_pp]
-                
-            st.dataframe(df_pen_prov_filt.drop(columns=["PERIODO"], errors="ignore"), use_container_width=True)
-            
-            with st.expander("🗑️ Eliminar Registro de Penalización a Proveedor"):
-                ids_pp = df_pen_prov_filt["ID_PENALIZACION"].tolist() if not df_pen_prov_filt.empty else []
-                if ids_pp:
-                    id_del_pp = st.selectbox("Selecciona ID a eliminar:", ids_pp, key="del_pp_sel")
-                    if st.button("Eliminar Registro", key="btn_del_pp"):
-                        try:
-                            supabase.table("PENALIZACIONES").delete().eq("ID_PENALIZACION", id_del_pp).execute()
-                            st.success("Registro eliminado con éxito.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al eliminar: {e}")
-        else:
-            st.info("No hay registros de penalizaciones a proveedores.")
-            
-        with st.expander("➕ Registrar Penalización Histórica (Solo Bitácora)"):
-            id_pen_p_auto = generar_id("PEN-PROV")
-            with st.form("form_pen_proveedor"):
-                st.text_input("ID Penalización", value=id_pen_p_auto, disabled=True)
-                
-                mapa_prov_p = dict(zip(df_prov_pen["NOMBRE_COMERCIAL"], df_prov_pen["ID_PROVEEDOR"])) if not df_prov_pen.empty else {}
-                lista_n_prov = list(mapa_prov_p.keys())
-                prov_sel_pen = st.selectbox("Proveedor", lista_n_prov)
-                
-                fec_pen_p = st.date_input("Fecha", key="fec_pp")
-                motivo_pen_p = st.text_area("Motivo / Detalle", key="mot_pp")
-                monto_pen_p = st.number_input("Monto ($)", min_value=0.0, format="%.2f", key="mnt_pp")
-                
-                if st.form_submit_button("Guardar en Bitácora"):
-                    if not lista_n_prov:
-                        st.error("Registra proveedores primero.")
-                    else:
-                        id_prov_real = mapa_prov_p.get(prov_sel_pen)
-                        try:
-                            supabase.table("PENALIZACIONES").insert({
-                                "ID_PENALIZACION": id_pen_p_auto,
-                                "TIPO_ENTIDAD": "PROVEEDOR",
-                                "ID_AFECTADO": id_prov_real,
-                                "FECHA": str(fec_pen_p),
-                                "MOTIVO": motivo_pen_p,
-                                "MONTO": monto_pen_p
-                            }).execute()
-                            st.success("¡Registrado en bitácora correctamente!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al guardar: {e}")
+            st.info("No hay datos suficientes en Deudas por Pagar.")

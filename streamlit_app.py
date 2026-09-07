@@ -1060,9 +1060,9 @@ with tab6:
                     try:
                         fecha_default = datetime.strptime(nota_a_editar["fecha_creacion"], "%Y-%m-%d").date()
                     except Exception:
-                        fecha_default = date.today()
+                        fecha_default = datetime.today().date()
                 else:
-                    fecha_default = date.today()
+                    fecha_default = datetime.today().date()
                 
                 fecha_input = st.date_input("Fecha", value=fecha_default)
             with col_f2:

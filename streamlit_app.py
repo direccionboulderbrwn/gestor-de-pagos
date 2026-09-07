@@ -51,6 +51,9 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ==========================================
 # TAB 1: DEUDAS POR COBRAR
 # ==========================================
+# ==========================================
+# TAB 1: DEUDAS POR COBRAR
+# ==========================================
 with tab1:
     st.subheader("💰 Listado de Deudas por Cobrar a Clientes")
     df_cobrar = fetch_table("DEUDAS_X_COBRAR")
@@ -204,7 +207,7 @@ with tab1:
                     id_cli_real = mapa_clis.get(cliente_nombre_sel)
                     try:
                         detalle_completo = f"{concepto} | Subtotal: ${monto_base:,.2f}"
-                        if aplica_penalizacion:
+                        if aplica_pen_cli:
                             detalle_completo += f" | Menos Penalización (${monto_penalizacion:,.2f}): {motivo_penalizacion}"
                         if aplicar_resico:
                             detalle_completo += f" | Retenciones RESICO aplicadas"
@@ -235,7 +238,6 @@ with tab1:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
-
 # ==========================================
 # TAB 2: DEUDAS POR PAGAR Y ABONOS/LIQUIDACIÓN
 # ==========================================

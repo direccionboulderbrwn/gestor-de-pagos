@@ -743,7 +743,7 @@ with tab4:
 # ==========================================
 with tab5:
     st.subheader("⚠️ Auditoría y Control Consolidado de Penalizaciones")
-    st.info("💡 Este módulo extrae y consolida automáticamente todas las penalizaciones aplicadas en Deudas por Cobrar (Clientes) y Deudas por Pagar (Proveedores), respetando la fuente original sin duplicar registros y reflejando su impacto en las deducciones.")
+    st.info("💡 Este módulo extrae y consolida exclusivamente el costo neto de las penalizaciones aplicadas en Deudas por Cobrar (Clientes) y Deudas por Pagar (Proveedores).")
 
     # Selector de vista
     tipo_pen_vista = st.radio(
@@ -760,7 +760,7 @@ with tab5:
     df_prov_audit = fetch_table("PROVEEDORES")
 
     if tipo_pen_vista == "Penalizaciones Aplicadas por Clientes (Tab 1)":
-        st.markdown("### 🏢 Penalizaciones Registradas en Clientes")
+        st.markdown("### 🏢 Costo Neto de Penalizaciones por Clientes")
         
         if not df_cxc_audit.empty and not df_cli_audit.empty:
             df_cxc_audit = df_cxc_audit.merge(
@@ -771,10 +771,18 @@ with tab5:
             ).rename(columns={"NOMBRE_COMERCIAL": "NOMBRE_CLIENTE"})
 
         if not df_cxc_audit.empty and "CONCEPTO" in df_cxc_audit.columns:
-            # Filtrar registros que contengan penalizaciones en su concepto
             df_pen_cxc = df_cxc_audit[df_cxc_audit["CONCEPTO"].str.contains("Penalización|Total Penalizaciones", case=False, na=False)].copy()
             
             if not df_pen_cxc.empty:
+                # Función auxiliar para extraer numéricamente el monto exacto de la penalización desde el texto del concepto
+                import re
+                def extraer_monto_pen(texto):
+                    match = re.search(r"Penalizaciones\s*\(\$(\d[\d,]*\.?\d*)\)", str(texto))
+                    if match:
+                        return float(match.group(1).replace(",", ""))
+                    return 0.0
+
+                df_pen_cxc["MONTO_NETO_PENALIZACION"] = df_pen_cxc["CONCEPTO"].apply(extraer_monto_pen)
                 df_pen_cxc["PERIODO"] = pd.to_datetime(df_pen_cxc["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
                 
                 # Filtro de Periodo
@@ -784,12 +792,14 @@ with tab5:
                 if sel_per_c != "Todos":
                     df_pen_cxc = df_pen_cxc[df_pen_cxc["PERIODO"] == sel_per_c]
                 
-                # Mostrar métrica del total de penalizaciones de cliente en este filtro
-                total_pen_c = df_pen_cxc["VALOR"].sum() # Referencia analítica
-                st.metric("Total Registros con Penalización de Cliente (Filtrados)", len(df_pen_cxc))
+                # Métrica clara del costo neto acumulado de penalizaciones
+                total_neto_pen_c = df_pen_cxc["MONTO_NETO_PENALIZACION"].sum()
+                col_m1, col_m2 = st.columns(2)
+                col_m1.metric("Total Registros con Penalización", len(df_pen_cxc))
+                col_m2.metric("Suma Total Costo Neto Penalizaciones", f"${total_neto_pen_c:,.2f}")
+                st.markdown("---")
                 
-                # Seleccionar columnas clave para visualización clara
-                cols_mostrar = [c for c in ["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_CLIENTE", "ESTATUS", "VALOR", "CONCEPTO"] if c in df_pen_cxc.columns]
+                cols_mostrar = [c for c in ["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_CLIENTE", "ESTATUS", "MONTO_NETO_PENALIZACION", "CONCEPTO"] if c in df_pen_cxc.columns]
                 st.dataframe(df_pen_cxc[cols_mostrar], use_container_width=True)
             else:
                 st.info("No se encontraron registros de deudas con penalizaciones de clientes asociadas.")
@@ -797,7 +807,7 @@ with tab5:
             st.info("No hay datos suficientes en Deudas por Cobrar.")
 
     else:
-        st.markdown("### 🚛 Penalizaciones Registradas a Proveedores")
+        st.markdown("### 🚛 Costo Neto de Penalizaciones a Proveedores")
         
         if not df_cxp_audit.empty and not df_prov_audit.empty:
             df_cxp_audit = df_cxp_audit.merge(
@@ -811,18 +821,29 @@ with tab5:
             df_pen_cxp = df_cxp_audit[df_cxp_audit["CONCEPTO"].str.contains("Penalización|Menos Penalización|Descuento", case=False, na=False)].copy()
             
             if not df_pen_cxp.empty:
+                import re
+                def extraer_monto_pen_p(texto):
+                    match = re.search(r"Penalizaciones.*?\(\$(\d[\d,]*\.?\d*)\)", str(texto))
+                    if match:
+                        return float(match.group(1).replace(",", ""))
+                    return 0.0
+
+                df_pen_cxp["MONTO_NETO_PENALIZACION"] = df_pen_cxp["CONCEPTO"].apply(extraer_monto_pen_p)
                 df_pen_cxp["PERIODO"] = pd.to_datetime(df_pen_cxp["FECHA_OPERACION"], errors='coerce').dt.strftime('%Y-%m')
                 
-                # Filtro de Periodo
                 per_p = ["Todos"] + sorted(df_pen_cxp["PERIODO"].dropna().unique().tolist(), reverse=True)
                 sel_per_p = st.selectbox("Filtrar por Periodo (Mes):", per_p, key="sel_per_audit_p")
                 
                 if sel_per_p != "Todos":
                     df_pen_cxp = df_pen_cxp[df_pen_cxp["PERIODO"] == sel_per_p]
                 
-                st.metric("Total Registros con Penalización a Proveedor (Filtrados)", len(df_pen_cxp))
+                total_neto_pen_p = df_pen_cxp["MONTO_NETO_PENALIZACION"].sum()
+                col_pm1, col_pm2 = st.columns(2)
+                col_pm1.metric("Total Registros con Penalización", len(df_pen_cxp))
+                col_pm2.metric("Suma Total Costo Neto Penalizaciones", f"${total_neto_pen_p:,.2f}")
+                st.markdown("---")
                 
-                cols_mostrar_p = [c for c in ["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_PROVEEDOR", "ESTATUS", "VALOR", "CONCEPTO"] if c in df_pen_cxp.columns]
+                cols_mostrar_p = [c for c in ["ID_MOVIMIENTO", "FECHA_OPERACION", "NOMBRE_PROVEEDOR", "ESTATUS", "MONTO_NETO_PENALIZACION", "CONCEPTO"] if c in df_pen_cxp.columns]
                 st.dataframe(df_pen_cxp[cols_mostrar_p], use_container_width=True)
             else:
                 st.info("No se encontraron registros de deudas con penalizaciones a proveedores asociadas.")

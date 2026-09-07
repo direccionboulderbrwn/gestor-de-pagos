@@ -263,8 +263,19 @@ with tab3:
 # ==========================================
 # TAB 4: CLIENTES Y PROVEEDORES
 # ==========================================
+# ==========================================
+# TAB 4: CLIENTES Y PROVEEDORES
+# ==========================================
 with tab4:
+    # Inicializar contadores de sesión para forzar la limpieza de formularios al guardar
+    if "form_cli_key" not in st.session_state:
+        st.session_state["form_cli_key"] = 0
+    if "form_pro_key" not in st.session_state:
+        st.session_state["form_pro_key"] = 0
+
     col1, col2 = st.columns(2)
+    
+    # --- CLIENTES ---
     with col1:
         st.subheader("Catálogo de Clientes")
         df_cli = fetch_table("CLIENTES")
@@ -286,14 +297,17 @@ with tab4:
                 st.info("No hay clientes registrados para eliminar.")
                         
         with st.expander("➕ Agregar Cliente"):
+            # Generar ID dinámico basado en el estado de sesión para que cambie al guardarse
             id_cli_auto = generar_id("CLI")
-            with st.form("form_cliente"):
+            
+            # Usamos la llave dinámica (form_cli_key) para reiniciar el formulario por completo
+            with st.form(f"form_cliente_{st.session_state['form_cli_key']}"):
                 st.text_input("ID Cliente (Generado Automáticamente)", value=id_cli_auto, disabled=True)
-                nombre_cli = st.text_input("Nombre Comercial")
-                rep_cli = st.text_input("Representante Legal")
-                rfc_cli = st.text_input("RFC")
-                fecha_alta_cli = st.date_input("Fecha de Alta")
-                com_cli = st.text_input("Comentarios")
+                nombre_cli = st.text_input("Nombre Comercial", key=f"nom_cli_{st.session_state['form_cli_key']}")
+                rep_cli = st.text_input("Representante Legal", key=f"rep_cli_{st.session_state['form_cli_key']}")
+                rfc_cli = st.text_input("RFC", key=f"rfc_cli_{st.session_state['form_cli_key']}")
+                fecha_alta_cli = st.date_input("Fecha de Alta", key=f"fec_cli_{st.session_state['form_cli_key']}")
+                com_cli = st.text_input("Comentarios", key=f"com_cli_{st.session_state['form_cli_key']}")
                 
                 sub_cli = st.form_submit_button("Guardar Cliente")
                 if sub_cli:
@@ -306,11 +320,15 @@ with tab4:
                             "FECHA_INGRESO": str(fecha_alta_cli),
                             "COMENTARIOS": com_cli
                         }).execute()
-                        st.success("Cliente guardado exitosamente")
+                        
+                        # Incrementamos la llave para forzar que el formulario se limpie y cree un nuevo ID
+                        st.session_state["form_cli_key"] += 1
+                        st.success("¡Cliente guardado exitosamente!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error al guardar: {e}")
                         
+    # --- PROVEEDORES ---
     with col2:
         st.subheader("Catálogo de Proveedores")
         df_pro = fetch_table("PROVEEDORES")
@@ -333,13 +351,14 @@ with tab4:
                         
         with st.expander("➕ Agregar Proveedor"):
             id_pro_auto = generar_id("PROV")
-            with st.form("form_proveedor"):
+            
+            with st.form(f"form_proveedor_{st.session_state['form_pro_key']}"):
                 st.text_input("ID Proveedor (Generado Automáticamente)", value=id_pro_auto, disabled=True)
-                nombre_pro = st.text_input("Nombre Comercial Proveedor")
-                rep_pro = st.text_input("Representante Legal")
-                rfc_pro = st.text_input("RFC")
-                fecha_alta_pro = st.date_input("Fecha de Alta", key="fec_alta_pro")
-                com_pro = st.text_input("Comentarios")
+                nombre_pro = st.text_input("Nombre Comercial Proveedor", key=f"nom_pro_{st.session_state['form_pro_key']}")
+                rep_pro = st.text_input("Representante Legal", key=f"rep_pro_{st.session_state['form_pro_key']}")
+                rfc_pro = st.text_input("RFC", key=f"rfc_pro_{st.session_state['form_pro_key']}")
+                fecha_alta_pro = st.date_input("Fecha de Alta", key=f"fec_pro_{st.session_state['form_pro_key']}")
+                com_pro = st.text_input("Comentarios", key=f"com_pro_{st.session_state['form_pro_key']}")
                 
                 sub_pro = st.form_submit_button("Guardar Proveedor")
                 if sub_pro:
@@ -352,10 +371,13 @@ with tab4:
                             "FECHA_INGRESO": str(fecha_alta_pro),
                             "COMENTARIOS": com_pro
                         }).execute()
-                        st.success("Proveedor guardado exitosamente")
+                        
+                        # Incrementamos la llave para reiniciar el formulario de proveedores
+                        st.session_state["form_pro_key"] += 1
+                        st.success("¡Proveedor guardado exitosamente!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error al guardar: {e}")
 # ==========================================
 # TAB 5: PENALIZACIONES
 # ==========================================

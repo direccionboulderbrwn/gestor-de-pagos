@@ -51,9 +51,6 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ==========================================
 # TAB 1: DEUDAS POR COBRAR
 # ==========================================
-# ==========================================
-# TAB 1: DEUDAS POR COBRAR
-# ==========================================
 with tab1:
     st.subheader("💰 Listado de Deudas por Cobrar a Clientes")
     df_cobrar = fetch_table("DEUDAS_X_COBRAR")
@@ -175,13 +172,9 @@ with tab1:
             st.markdown("##### 🧮 Cálculo de Importes, Penalización y Tasas Fiscales")
             monto_base = st.number_input("Monto Base / Subtotal Factura ($)", min_value=0.0, format="%.2f", key="val_base_cxc")
             
-            col_pen1, col_pen2 = st.columns(2)
-            with col_pen1:
-                aplica_pen_cli = st.checkbox("¿El cliente aplicó penalización a este monto?", key="chk_pen_cli")
-            with col_pen2:
-                monto_penalizacion = st.number_input("Monto Penalización ($)", min_value=0.0, format="%.2f", key="val_pen_cli") if aplica_pen_cli else 0.0
-            
-            motivo_penalizacion = st.text_input("Motivo de la Penalización (si aplica)", key="mot_pen_cli") if aplica_pen_cli else ""
+            aplica_pen_cli = st.checkbox("¿El cliente aplicó penalización a este monto?", key="chk_pen_cli")
+            monto_penalizacion = st.number_input("Monto de la Penalización ($)", min_value=0.0, format="%.2f", key="val_pen_cli")
+            motivo_penalizacion = st.text_input("Motivo o detalle de la Penalización", key="mot_pen_cli")
             
             col_imp1, col_imp2 = st.columns(2)
             with col_imp1:
@@ -192,13 +185,15 @@ with tab1:
             concepto = st.text_area("Concepto / Detalle general", key="con_cxc_form")
             
             # --- CÁLCULO FINANCIERO Y FISCAL ---
-            subtotal_neto = max(0.0, monto_base - monto_penalizacion)
+            penalizacion_real = monto_penalizacion if aplica_pen_cli else 0.0
+            
+            subtotal_neto = max(0.0, monto_base - penalizacion_real)
             iva_monto = subtotal_neto * 0.16 if aplicar_iva else 0.0
             ret_isr = subtotal_neto * 0.0125 if aplicar_resico else 0.0
             ret_iva = subtotal_neto * (2/3 * 0.16) if aplicar_resico else 0.0
             monto_final_neto = subtotal_neto + iva_monto - ret_isr - ret_iva
             
-            st.info(f"💡 **Resumen Calculado:** Subtotal Neto: **${subtotal_neto:,.2f}** | IVA: **${iva_monto:,.2f}** | Retenciones: **-${(ret_isr + ret_iva):,.2f}** | **Monto Final a Facturar/Cobrar: ${monto_final_neto:,.2f}**")
+            st.info(f"💡 Subtotal Neto: ${subtotal_neto:,.2f} | IVA: ${iva_monto:,.2f} | Retenciones: -${(ret_isr + ret_iva):,.2f} | Monto Final: ${monto_final_neto:,.2f}")
             
             if st.form_submit_button("Guardar Deuda con Desglose Fiscal"):
                 if not lista_nombres_cli:
@@ -207,8 +202,8 @@ with tab1:
                     id_cli_real = mapa_clis.get(cliente_nombre_sel)
                     try:
                         detalle_completo = f"{concepto} | Subtotal: ${monto_base:,.2f}"
-                        if aplica_pen_cli:
-                            detalle_completo += f" | Menos Penalización (${monto_penalizacion:,.2f}): {motivo_penalizacion}"
+                        if aplica_pen_cli and penalizacion_real > 0:
+                            detalle_completo += f" | Menos Penalización (${penalizacion_real:,.2f}): {motivo_penalizacion}"
                         if aplicar_resico:
                             detalle_completo += f" | Retenciones RESICO aplicadas"
 

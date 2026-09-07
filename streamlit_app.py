@@ -31,10 +31,11 @@ def fetch_table(table_name):
 st.title("📊 Control Operativo y Financiero - TEN")
 st.markdown("---")
 
-# Pestañas principales de navegación
-tab1, tab2, tab3, tab4 = st.tabs([
+# Pestañas principales de navegación (¡Incluyendo BALANCE!)
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "💰 Deudas por Cobrar", 
     "📉 Deudas por Pagar", 
+    "📈 Balance Financiero",
     "👥 Clientes y Proveedores",
     "⚠️ Penalizaciones"
 ])
@@ -47,7 +48,6 @@ with tab1:
     df_cobrar = fetch_table("DEUDAS_X_COBRAR")
     
     if not df_cobrar.empty:
-        # Filtro por Estatus
         if "ESTATUS" in df_cobrar.columns:
             estatus_list = ["Todos"] + list(df_cobrar["ESTATUS"].dropna().unique())
             filtro = st.selectbox("Filtrar por Estatus:", estatus_list, key="filtro_cobrar")
@@ -65,7 +65,6 @@ with tab1:
             estatus = st.selectbox("Estatus", ["Pendiente", "Pagado", "Parcial"])
             valor = st.number_input("Valor ($)", min_value=0.0, format="%.2f")
             
-            # Cargar clientes para el selectbox
             df_clientes = fetch_table("CLIENTES")
             lista_clientes = df_clientes["ID_CLIENTE"].tolist() if not df_clientes.empty else []
             cliente = st.selectbox("Cliente", lista_clientes)
@@ -144,9 +143,60 @@ with tab2:
                     st.error(f"Error al guardar: {e}")
 
 # ==========================================
-# TAB 3: CLIENTES Y PROVEEDORES
+# TAB 3: BALANCE FINANCIERO (NUEVO)
 # ==========================================
 with tab3:
+    st.subheader("📈 Estado de Resultados y Balance General")
+    df_balance = fetch_table("BALANCE")
+    
+    if not df_balance.empty:
+        # Métricas rápidas si existen columnas de tipo y monto
+        if "TIPO" in df_balance.columns and "MONTO" in df_balance.columns:
+            ingresos = df_balance[df_balance["TIPO"].str.lower().isin(["ingreso", "venta", "cobro"])]["MONTO"].sum()
+            egresos = df_balance[df_balance["TIPO"].str.lower().isin(["egreso", "gasto", "pago"])]["MONTO"].sum()
+            balance_neto = ingresos - egresos
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Ingresos", f"${ingresos:,.2f}")
+            col2.metric("Total Egresos", f"${egresos:,.2f}")
+            col3.metric("Balance Neto", f"${balance_neto:,.2f}", delta=f"${balance_neto:,.2f}")
+            st.markdown("---")
+            
+        st.dataframe(df_balance, use_container_width=True)
+    else:
+        st.info("No hay registros en la tabla BALANCE.")
+        
+    with st.expander("➕ Registrar Movimiento en Balance"):
+        with st.form("form_balance"):
+            id_bal = st.text_input("ID Balance (ej. BAL-001)")
+            fecha_bal = st.date_input("Fecha de Movimiento", key="fec_bal")
+            tipo_bal = st.selectbox("Tipo de Movimiento", ["Ingreso", "Egreso", "Gasto", "Venta"])
+            concepto_bal = st.text_input("Concepto / Detalle")
+            monto_bal = st.number_input("Monto ($)", min_value=0.0, format="%.2f", key="mnt_bal")
+            ref_bal = st.text_input("Referencia Origen (Opcional)")
+            
+            submit_bal = st.form_submit_button("Guardar en Balance")
+            
+            if submit_bal:
+                try:
+                    data = {
+                        "ID_BALANCE": id_bal,
+                        "FECHA": str(fecha_bal),
+                        "TIPO": tipo_bal,
+                        "CONCEPTO / DETALLE": concepto_bal,
+                        "MONTO": monto_bal,
+                        "REF_ORIGEN": ref_bal
+                    }
+                    supabase.table("BALANCE").insert(data).execute()
+                    st.success("¡Movimiento guardado en Balance con éxito!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
+
+# ==========================================
+# TAB 4: CLIENTES Y PROVEEDORES
+# ==========================================
+with tab4:
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Catálogo de Clientes")
@@ -203,9 +253,9 @@ with tab3:
                         st.error(f"Error: {e}")
 
 # ==========================================
-# TAB 4: PENALIZACIONES
+# TAB 5: PENALIZACIONES
 # ==========================================
-with tab4:
+with tab5:
     st.subheader("Registro de Penalizaciones")
     df_pen = fetch_table("PENALIZACIONES")
     st.dataframe(df_pen, use_container_width=True)

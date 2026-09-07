@@ -390,7 +390,7 @@ with tab4:
                         st.error(f"Error al eliminar: {e}")
             else:
                 st.info("No hay conductores para eliminar.")
-
+                
     with col2:
         with st.expander("➕ Registrar Conductor (Modelo Mixto)"):
             id_cond_auto = generar_id("COND")
@@ -399,24 +399,34 @@ with tab4:
                 nombre_cond = st.text_input("Nombre Completo del Conductor", key=f"nom_cond_{st.session_state['form_cond_key']}")
                 rfc_cond = st.text_input("RFC del Conductor", key=f"rfc_cond_{st.session_state['form_cond_key']}")
                 
-                # Cargar lista de proveedores actuales para asociarlo
+                # Cargar proveedores y mapear Nombre Comercial -> ID_PROVEEDOR
                 df_provs_select = fetch_table("PROVEEDORES")
-                lista_proveedores = df_provs_select["ID_PROVEEDOR"].tolist() if not df_provs_select.empty else []
-                proveedor_asignado = st.selectbox("Proveedor al que Pertenece", lista_proveedores, key=f"prov_asig_{st.session_state['form_cond_key']}")
+                if not df_provs_select.empty:
+                    mapa_proveedores = dict(zip(df_provs_select["NOMBRE_COMERCIAL"], df_provs_select["ID_PROVEEDOR"]))
+                    lista_nombres_prov = list(mapa_proveedores.keys())
+                else:
+                    mapa_proveedores = {}
+                    lista_nombres_prov = []
+                
+                # Mostramos los nombres comerciales para que sea fácil identificarlos
+                proveedor_seleccionado_nombre = st.selectbox("Proveedor al que Pertenece", lista_nombres_prov, key=f"prov_asig_{st.session_state['form_cond_key']}")
                 
                 fecha_alta_cond = st.date_input("Fecha de Alta", key=f"fec_cond_{st.session_state['form_cond_key']}")
                 com_cond = st.text_input("Comentarios / Unidad asignada", key=f"com_cond_{st.session_state['form_cond_key']}")
                 
                 if st.form_submit_button("Guardar Conductor"):
-                    if not proveedor_asignado:
+                    if not lista_nombres_prov:
                         st.error("Debes registrar al menos un proveedor antes de dar de alta conductores.")
                     else:
+                        # Obtenemos el ID real utilizando el nombre seleccionado
+                        id_proveedor_real = mapa_proveedores.get(proveedor_seleccionado_nombre)
+                        
                         try:
                             supabase.table("CONDUCTORES").insert({
                                 "ID_CONDUCTOR": id_cond_auto,
                                 "NOMBRE_CONDUCTOR": nombre_cond,
                                 "RFC_CONDUCTOR": rfc_cond,
-                                "ID_PROVEEDOR": proveedor_asignado,
+                                "ID_PROVEEDOR": id_proveedor_real,
                                 "FECHA_ALTA": str(fecha_alta_cond),
                                 "COMENTARIOS": com_cond
                             }).execute()

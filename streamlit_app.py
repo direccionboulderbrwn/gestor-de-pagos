@@ -282,6 +282,8 @@ with tab4:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al eliminar (asegúrate de que no tenga deudas activas asociadas): {e}")
+            else:
+                st.info("No hay clientes registrados para eliminar.")
                         
         with st.expander("➕ Agregar Cliente"):
             id_cli_auto = generar_id("CLI")
@@ -290,6 +292,7 @@ with tab4:
                 nombre_cli = st.text_input("Nombre Comercial")
                 rep_cli = st.text_input("Representante Legal")
                 rfc_cli = st.text_input("RFC")
+                fecha_alta_cli = st.date_input("Fecha de Alta")
                 com_cli = st.text_input("Comentarios")
                 
                 sub_cli = st.form_submit_button("Guardar Cliente")
@@ -300,6 +303,7 @@ with tab4:
                             "NOMBRE_COMERCIAL": nombre_cli,
                             "REP_LEGAL": rep_cli,
                             "RFC": rfc_cli,
+                            "FECHA_INGRESO": str(fecha_alta_cli),
                             "COMENTARIOS": com_cli
                         }).execute()
                         st.success("Cliente guardado exitosamente")
@@ -324,6 +328,8 @@ with tab4:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al eliminar: {e}")
+            else:
+                st.info("No hay proveedores registrados para eliminar.")
                         
         with st.expander("➕ Agregar Proveedor"):
             id_pro_auto = generar_id("PROV")
@@ -332,6 +338,7 @@ with tab4:
                 nombre_pro = st.text_input("Nombre Comercial Proveedor")
                 rep_pro = st.text_input("Representante Legal")
                 rfc_pro = st.text_input("RFC")
+                fecha_alta_pro = st.date_input("Fecha de Alta", key="fec_alta_pro")
                 com_pro = st.text_input("Comentarios")
                 
                 sub_pro = st.form_submit_button("Guardar Proveedor")
@@ -342,13 +349,13 @@ with tab4:
                             "NOMBRE_COMERCIAL": nombre_pro,
                             "REP_LEGAL": rep_pro,
                             "RFC": rfc_pro,
+                            "FECHA_INGRESO": str(fecha_alta_pro),
                             "COMENTARIOS": com_pro
                         }).execute()
                         st.success("Proveedor guardado exitosamente")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
-
 # ==========================================
 # TAB 5: PENALIZACIONES
 # ==========================================
